@@ -1,0 +1,2607 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Аналітичний дешборд: Клієнти, Запити, Послуги</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif']
+          }
+        }
+      }
+    };
+  </script>
+  <!-- Шрифт Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <!-- D3.js для інтерактивних діаграм -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+  <!-- SheetJS (xlsx) для прямого читання Excel (.xlsx / .xls / .csv) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <style>
+    body { font-family: 'Inter', sans-serif; }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: rgba(148, 163, 184, 0.45); border-radius: 9999px; }
+    ::-webkit-scrollbar-thumb:hover { background: rgba(100, 116, 139, 0.7); }
+    .chart-tooltip {
+      position: fixed;
+      pointer-events: none;
+      z-index: 9999;
+      transition: opacity 0.12s ease;
+    }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800 dark:bg-slate-950 dark:text-slate-100 transition-colors duration-200 min-h-screen flex flex-col">
+
+  <!-- Спливаюча підказка для графіків -->
+  <div id="chartTooltip" class="chart-tooltip opacity-0 bg-slate-900/95 text-white text-xs rounded-xl px-3.5 py-2.5 shadow-xl border border-slate-700/80 max-w-xs"></div>
+
+  <!-- Повідомлення -->
+  <div id="toastBox" class="fixed bottom-5 right-5 z-50 hidden max-w-md rounded-2xl bg-slate-900 text-white px-4 py-3 text-sm shadow-2xl border border-slate-700 flex items-start gap-3">
+    <span id="toastText" class="leading-snug"></span>
+    <button type="button" onclick="document.getElementById('toastBox').classList.add('hidden')" class="text-slate-400 hover:text-white font-bold ml-auto cursor-pointer shrink-0">✕</button>
+  </div>
+
+  <!-- Модальне вікно попередження про структуру завантаженого файлу -->
+  <div id="schemaWarningModal" class="fixed inset-0 z-50 hidden bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4">
+    <div class="bg-white dark:bg-slate-900 border border-amber-300 dark:border-amber-700/70 rounded-2xl max-w-2xl w-full max-h-[85vh] flex flex-col shadow-2xl overflow-hidden">
+      <div class="px-5 py-4 bg-amber-50 dark:bg-amber-950/50 border-b border-amber-200 dark:border-amber-800/70 flex items-center justify-between gap-3">
+        <div class="flex items-center gap-2.5">
+          <span class="w-8 h-8 rounded-xl bg-amber-500 text-white flex items-center justify-center font-bold shrink-0">!</span>
+          <div>
+            <h3 class="font-bold text-base text-slate-900 dark:text-white">Увага: виявлено розбіжності у структурі файлу</h3>
+            <p class="text-xs text-slate-600 dark:text-slate-300">Перевірте назви вкладок та колонок у завантаженому документі</p>
+          </div>
+        </div>
+        <button type="button" id="closeSchemaModalBtn" class="p-1.5 rounded-lg text-slate-500 hover:text-slate-800 dark:hover:text-white hover:bg-amber-100 dark:hover:bg-amber-900/50 cursor-pointer">✕</button>
+      </div>
+      <div id="schemaWarningBody" class="p-5 overflow-y-auto space-y-3 text-xs sm:text-sm text-slate-700 dark:text-slate-200"></div>
+      <div class="px-5 py-3 bg-slate-50 dark:bg-slate-800/60 border-t border-slate-200 dark:border-slate-800 flex justify-end">
+        <button type="button" id="ackSchemaModalBtn" class="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs sm:text-sm font-semibold cursor-pointer">
+          Зрозуміло, продовжити
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Модальне вікно перегляду запису таблиці -->
+  <div id="recordModal" class="fixed inset-0 z-50 hidden bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4">
+    <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-2xl w-full max-h-[85vh] flex flex-col shadow-2xl overflow-hidden">
+      <div class="px-5 py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+        <h3 id="modalTitle" class="font-bold text-base text-slate-900 dark:text-white">Деталі запису</h3>
+        <button type="button" id="closeModalBtn" class="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer">✕</button>
+      </div>
+      <div id="modalBody" class="p-5 overflow-y-auto space-y-2.5 text-sm"></div>
+    </div>
+  </div>
+
+  <!-- Модальне вікно підключення Google Таблиці за посиланням -->
+  <div id="googleSheetModal" class="fixed inset-0 z-50 hidden bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4">
+    <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-xl w-full flex flex-col shadow-2xl overflow-hidden">
+      <div class="px-5 py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3">
+        <div class="flex items-center gap-2.5">
+          <span class="w-8 h-8 rounded-xl bg-emerald-600 text-white flex items-center justify-center font-bold text-sm shrink-0">G</span>
+          <div>
+            <h3 class="font-bold text-base text-slate-900 dark:text-white">Підключити Google Таблицю</h3>
+            <p class="text-xs text-slate-500 dark:text-slate-400">Вставте посилання на документ із вкладками «Клієнти», «Запити», «Послуги»</p>
+          </div>
+        </div>
+        <button type="button" id="closeGoogleModalBtn" class="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer">✕</button>
+      </div>
+      <div class="p-5 space-y-4 text-xs sm:text-sm">
+        <div>
+          <label for="googleSheetUrlInput" class="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1.5">
+            Посилання на Google Таблицю (URL)
+          </label>
+          <input type="url" id="googleSheetUrlInput" placeholder="https://docs.google.com/spreadsheets/d/..." class="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs sm:text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+        </div>
+        <div class="p-3 rounded-xl bg-slate-100/80 dark:bg-slate-800/80 text-xs text-slate-600 dark:text-slate-300 space-y-1">
+          <div class="font-semibold text-slate-800 dark:text-slate-200">Як надати доступ:</div>
+          <div>1. У Google Таблиці натисніть <strong>«Поділитися»</strong> → оберіть <strong>«Усі, хто має посилання» (Переглядач)</strong>.</div>
+          <div>2. Скопіюйте посилання з адресного рядка браузера та натисніть «Завантажити дані».</div>
+        </div>
+      </div>
+      <div class="px-5 py-3.5 bg-slate-50 dark:bg-slate-800/60 border-t border-slate-200 dark:border-slate-800 flex items-center justify-end gap-2">
+        <button type="button" id="cancelGoogleModalBtn" class="px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-xs sm:text-sm font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer">
+          Скасувати
+        </button>
+        <button type="button" id="loadGoogleSheetBtn" class="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs sm:text-sm font-semibold shadow-sm cursor-pointer">
+          Завантажити дані
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================================================================== -->
+  <!-- ШАПКА ТА ГЛОБАЛЬНІ ФІЛЬТРИ                                            -->
+  <!-- ===================================================================== -->
+  <header class="sticky top-0 z-30 bg-white/90 dark:bg-slate-900/90 backdrop-blur-md border-b border-slate-200/80 dark:border-slate-800">
+    <div class="max-w-[1640px] mx-auto px-4 sm:px-6 py-3.5 flex flex-col xl:flex-row xl:items-center justify-between gap-4">
+      <div class="flex items-start sm:items-center gap-3">
+        <div class="w-10 h-10 rounded-xl bg-indigo-600 text-white flex items-center justify-center shrink-0 shadow-md shadow-indigo-600/20">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z" />
+          </svg>
+        </div>
+        <div>
+          <div class="flex flex-wrap items-center gap-2">
+            <h1 class="text-lg sm:text-xl font-extrabold tracking-tight text-slate-900 dark:text-white">
+              Аналітика супроводу та звернень
+            </h1>
+            <span id="datasetBadge" class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-200">
+              Демо-дані (завантажте .xlsx)
+            </span>
+          </div>
+          <p class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+            Клікайте по будь-якому сегменту діаграми для миттєвої фільтрації таблиці нижче
+          </p>
+        </div>
+      </div>
+
+      <!-- Панель керування: Відповідальний менеджер, Дата аналізу, Завантаження Excel, Тема -->
+      <div class="flex flex-wrap items-center gap-2.5">
+        <!-- Глобальний фільтр: Відповідальний менеджер -->
+        <div class="flex items-center gap-2 bg-slate-100 dark:bg-slate-800 px-3 py-1.5 rounded-xl border border-slate-200/80 dark:border-slate-700">
+          <label for="managerFilter" class="text-xs font-semibold text-slate-500 dark:text-slate-400 whitespace-nowrap">
+            Відповідальний менеджер:
+          </label>
+          <select id="managerFilter" class="bg-transparent text-xs sm:text-sm font-bold text-slate-900 dark:text-white focus:outline-none cursor-pointer max-w-[260px]">
+            <option value="ALL">Усі менеджери (сумарно)</option>
+          </select>
+        </div>
+
+        <!-- Дата аналізу для діаграми #4 (Старий/Новий) -->
+        <div class="flex items-center gap-2 bg-slate-100 dark:bg-slate-800 px-3 py-1.5 rounded-xl border border-slate-200/80 dark:border-slate-700" title="Визначає поділ на Старий (до дати) та Новий (після дати) у діаграмі #4">
+          <label for="analysisDateInput" class="text-xs font-semibold text-slate-500 dark:text-slate-400 whitespace-nowrap">
+            Дата аналізу:
+          </label>
+          <input type="date" id="analysisDateInput" value="2026-10-01" class="bg-transparent text-xs sm:text-sm font-semibold text-slate-900 dark:text-white focus:outline-none cursor-pointer" />
+        </div>
+
+        <!-- Кнопка завантаження Excel -->
+        <label class="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs sm:text-sm font-semibold shadow-sm cursor-pointer transition">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+          </svg>
+          <span>Завантажити Excel (.xlsx)</span>
+          <input type="file" id="excelFileInput" accept=".xlsx,.xls,.csv" class="hidden" />
+        </label>
+
+        <!-- Кнопка підключення Google Таблиці -->
+        <button type="button" id="openGoogleSheetModalBtn" class="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs sm:text-sm font-semibold shadow-sm cursor-pointer transition">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m13.35-.622l1.757-1.757a4.5 4.5 0 00-6.364-6.364l-4.5 4.5a4.5 4.5 0 001.242 7.244" />
+          </svg>
+          <span>Google Таблиця</span>
+        </button>
+
+        <!-- Кнопка демо-даних -->
+        <button type="button" id="resetDemoBtn" class="px-3 py-2 rounded-xl bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 transition cursor-pointer">
+          Демо
+        </button>
+
+        <!-- Перемикач теми -->
+        <button type="button" id="themeToggleBtn" title="Змінити тему" class="p-2 rounded-xl bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 transition cursor-pointer">
+          <svg id="sunIcon" class="w-4 h-4 hidden dark:block" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 3v2.25m6.364.386l-1.591 1.591M21 12h-2.25m-.386 6.364l-1.591-1.591M12 18.75V21m-4.773-4.227l-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0z" />
+          </svg>
+          <svg id="moonIcon" class="w-4 h-4 block dark:hidden" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M21.752 15.002A9.718 9.718 0 0118 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 003 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 009.002-5.998z" />
+          </svg>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- ===================================================================== -->
+  <!-- ОСНОВНИЙ КОНТЕЙНЕР                                                    -->
+  <!-- ===================================================================== -->
+  <main class="max-w-[1640px] w-full mx-auto px-4 sm:px-6 py-6 space-y-6 flex-1">
+
+    <!-- Навігація по 3 вкладках + Індикатор активного клік-фільтра -->
+    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+      <div class="inline-flex p-1 rounded-2xl bg-slate-200/70 dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700 self-start">
+        <button type="button" data-tab="clients" class="tab-btn px-4 py-2 rounded-xl text-sm font-bold transition cursor-pointer bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs">
+          Клієнти <span id="tabCountClients" class="ml-1.5 px-2 py-0.5 text-xs rounded-full bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-300">0</span>
+        </button>
+        <button type="button" data-tab="requests" class="tab-btn px-4 py-2 rounded-xl text-sm font-bold transition cursor-pointer text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white">
+          Запити <span id="tabCountRequests" class="ml-1.5 px-2 py-0.5 text-xs rounded-full bg-slate-200/80 dark:bg-slate-700 text-slate-700 dark:text-slate-300">0</span>
+        </button>
+        <button type="button" data-tab="services" class="tab-btn px-4 py-2 rounded-xl text-sm font-bold transition cursor-pointer text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white">
+          Послуги <span id="tabCountServices" class="ml-1.5 px-2 py-0.5 text-xs rounded-full bg-slate-200/80 dark:bg-slate-700 text-slate-700 dark:text-slate-300">0</span>
+        </button>
+      </div>
+
+      <!-- Банер активного фільтра при кліку по діаграмі -->
+      <div id="activeFilterBanner" class="hidden items-center gap-2.5 px-3.5 py-2 rounded-xl bg-indigo-50 dark:bg-indigo-950/70 border border-indigo-200 dark:border-indigo-800 text-xs">
+        <span class="text-indigo-700 dark:text-indigo-300 font-medium">Активний фільтр діаграми:</span>
+        <strong id="activeFilterLabel" class="text-indigo-950 dark:text-white"></strong>
+        <button type="button" id="clearChartFilterBtn" class="ml-1 px-2 py-0.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-semibold cursor-pointer">
+          Скинути ✕
+        </button>
+      </div>
+    </div>
+
+    <!-- =================================================================== -->
+    <!-- ВКЛАДКА 1: КЛІЄНТИ (Показники 1-3, Діаграми 4-16)                   -->
+    <!-- =================================================================== -->
+    <div id="view-clients" class="tab-view space-y-6">
+      <!-- KPI-картки (#1, #2, #3) -->
+      <section class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div class="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-5 shadow-sm">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-bold uppercase tracking-wider text-slate-400">#1 • Загальна кількість клієнтів</span>
+            <span class="w-8 h-8 rounded-xl bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 flex items-center justify-center font-bold text-sm">👥</span>
+          </div>
+          <div id="kpi-clients" class="text-3xl font-extrabold text-slate-900 dark:text-white mt-2">0</div>
+          <p class="text-xs text-slate-500 dark:text-slate-400 mt-1">Унікальних записів у вкладці «Клієнти»</p>
+        </div>
+
+        <div class="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-5 shadow-sm">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-bold uppercase tracking-wider text-slate-400">#2 • Загальна кількість запитів</span>
+            <span class="w-8 h-8 rounded-xl bg-emerald-50 dark:bg-emerald-950 text-emerald-600 dark:text-emerald-400 flex items-center justify-center font-bold text-sm">📋</span>
+          </div>
+          <div id="kpi-requests" class="text-3xl font-extrabold text-slate-900 dark:text-white mt-2">0</div>
+          <p class="text-xs text-slate-500 dark:text-slate-400 mt-1">Записів у вкладці «Запити»</p>
+        </div>
+
+        <div class="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-5 shadow-sm">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-bold uppercase tracking-wider text-slate-400">#3 • Загальна кількість консультацій</span>
+            <span class="w-8 h-8 rounded-xl bg-amber-50 dark:bg-amber-950 text-amber-600 dark:text-amber-400 flex items-center justify-center font-bold text-sm">💬</span>
+          </div>
+          <div id="kpi-consultations" class="text-3xl font-extrabold text-slate-900 dark:text-white mt-2">0</div>
+          <p class="text-xs text-slate-500 dark:text-slate-400 mt-1">Записів у вкладці «Послуги»</p>
+        </div>
+      </section>
+
+      <!-- Ряд 1: Діаграми по менеджерах (#4, #5, #6) -->
+      <section class="grid grid-cols-1 lg:grid-cols-3 gap-5">
+        <div id="card-c4" class="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-5 shadow-sm flex flex-col overflow-hidden min-w-0"></div>
+        <div id="card-c5" class="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-5 shadow-sm flex flex-col overflow-hidden min-w-0"></div>
+        <div id="card-c6" class="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-5 shadow-sm flex flex-col overflow-hidden min-w-0"></div>
+      </section>
+
+      <!-- Ряд 2: Кругові діаграми статусів, статі та запитів (#7, #8, #11, #14) -->
+      <section class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-5">
+        <div id="card-c7" class="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-5 shadow-sm flex flex-col overflow-hidden min-w-0"></div>
+        <div id="card-c8" class="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-5 shadow-sm flex flex-col overflow-hidden min-w-0"></div>
+        <div id="card-c11" class="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-5 shadow-sm flex flex-col overflow-hidden min-w-0"></div>
+        <div id="card-c14" class="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-5 shadow-sm flex flex-col overflow-hidden min-w-0"></div>
+      </section>
+
+      <!-- Ряд 3: Вік та Канал першого звернення (#9, #10) -->
+      <section class="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        <div id="card-c9" class="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-5 shadow-sm flex flex-col overflow-hidden min-w-0"></div>
+        <div id="card-c10" class="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-5 shadow-sm flex flex-col overflow-hidden min-w-0"></div>
+      </section>
+
+      <!-- Ряд 4: Область та Що цікавить на момент першого звернення (#12, #13) -->
+      <section class="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        <div id="card-c12" class="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-5 shadow-sm flex flex-col overflow-hidden min-w-0"></div>
+        <div id="card-c13" class="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-5 shadow-sm flex flex-col overflow-hidden min-w-0"></div>
+      </section>
+
+      <!-- Ряд 5: Тривалість супроводу та Відсутність апдейту (#15, #16) -->
+      <section class="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        <div id="card-c15" class="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-5 shadow-sm flex flex-col overflow-hidden min-w-0"></div>
+        <div id="card-c16" class="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-5 shadow-sm flex flex-col overflow-hidden min-w-0"></div>
+      </section>
+    </div>
+
+    <!-- =================================================================== -->
+    <!-- ВКЛАДКА 2: ЗАПИТИ (Діаграми 17-25)                                  -->
+    <!-- =================================================================== -->
+    <div id="view-requests" class="tab-view hidden space-y-6">
+      <!-- Ряд 1: Розбивка по Відповідальному КК (#17, #18) -->
+      <section class="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        <div id="card-r17" class="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-5 shadow-sm flex flex-col overflow-hidden min-w-0"></div>
+        <div id="card-r18" class="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-5 shadow-sm flex flex-col overflow-hidden min-w-0"></div>
+      </section>
+
+      <!-- Ряд 2: РЕЗУЛЬТАТИ та Оцінка вирішення (#19, #20) -->
+      <section class="grid grid-cols-1 lg:grid-cols-2 gap-5 items-stretch">
+        <div id="card-r19" class="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-5 shadow-sm flex flex-col overflow-hidden min-w-0"></div>
+        <div id="card-r20" class="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-5 shadow-sm flex flex-col overflow-hidden min-w-0"></div>
+      </section>
+
+      <!-- Ряд 3: Консультації по запитах та Номер запиту (#21, #22) -->
+      <section class="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        <div id="card-r21" class="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-5 shadow-sm flex flex-col overflow-hidden min-w-0"></div>
+        <div id="card-r22" class="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-5 shadow-sm flex flex-col overflow-hidden min-w-0"></div>
+      </section>
+
+      <!-- Ряд 4: Тривалість запиту, Відсутність апдейту та Наявність клієнта в запитах (#23, #24, #25) -->
+      <section class="grid grid-cols-1 lg:grid-cols-3 gap-5">
+        <div id="card-r23" class="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-5 shadow-sm flex flex-col overflow-hidden min-w-0"></div>
+        <div id="card-r24" class="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-5 shadow-sm flex flex-col overflow-hidden min-w-0"></div>
+        <div id="card-r25" class="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-5 shadow-sm flex flex-col overflow-hidden min-w-0"></div>
+      </section>
+    </div>
+
+    <!-- =================================================================== -->
+    <!-- ВКЛАДКА 3: ПОСЛУГИ (Діаграми 26-28)                                 -->
+    <!-- =================================================================== -->
+    <div id="view-services" class="tab-view hidden space-y-6">
+      <section class="grid grid-cols-1 lg:grid-cols-12 gap-5 items-stretch">
+        <div id="card-s26" class="lg:col-span-3 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-5 shadow-sm flex flex-col overflow-hidden min-w-0"></div>
+        <div id="card-s27" class="lg:col-span-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-5 shadow-sm flex flex-col overflow-hidden min-w-0"></div>
+        <div id="card-s28" class="lg:col-span-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-5 shadow-sm flex flex-col overflow-hidden min-w-0"></div>
+      </section>
+    </div>
+
+    <!-- =================================================================== -->
+    <!-- ІНТЕРАКТИВНА СКРОЛ-ТАБЛИЦЯ ДАНИХ ПІД ГРАФІКАМИ                      -->
+    <!-- =================================================================== -->
+    <section class="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-sm overflow-hidden">
+      <div class="px-5 py-4 border-b border-slate-200/80 dark:border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-3">
+        <div>
+          <div class="flex items-center gap-2">
+            <h2 id="tableSectionTitle" class="text-base font-bold text-slate-900 dark:text-white">Таблиця даних: Клієнти</h2>
+            <span id="tableFilteredCount" class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">0</span>
+          </div>
+          <p class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+            Таблиця скролиться по вертикалі та горизонталі і миттєво оновлюється при виборі сегмента на графіках. Клікніть на рядок для перегляду повної картки.
+          </p>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-2.5">
+          <div class="relative">
+            <input type="text" id="tableSearchInput" placeholder="Пошук за ID, менеджером, статусом..." class="w-64 sm:w-72 pl-9 pr-3 py-1.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+            <svg class="w-4 h-4 text-slate-400 absolute left-3 top-2" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-4.35-4.35M17 11a6 6 0 11-12 0 6 6 0 0112 0z" />
+            </svg>
+          </div>
+          <button type="button" id="exportCsvBtn" class="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 transition cursor-pointer">
+            Експорт CSV
+          </button>
+        </div>
+      </div>
+
+      <!-- Контейнер із вертикальним і горизонтальним скролом та фіксованою шапкою -->
+      <div class="overflow-auto max-h-[540px] relative">
+        <table class="w-full text-left border-collapse text-xs sm:text-sm">
+          <thead id="dataTableHead" class="sticky top-0 z-10 bg-slate-100/95 dark:bg-slate-800/95 backdrop-blur-xs text-slate-600 dark:text-slate-300 uppercase text-[11px] font-bold tracking-wider border-b border-slate-200 dark:border-slate-700"></thead>
+          <tbody id="dataTableBody" class="divide-y divide-slate-100 dark:divide-slate-800/80"></tbody>
+        </table>
+      </div>
+
+      <!-- Нижній рядок статусу та пагінації -->
+      <div class="px-5 py-3 border-t border-slate-200/80 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-slate-500 dark:text-slate-400">
+        <div id="paginationInfo">Показано 0–0 із 0</div>
+        <div class="flex items-center gap-2">
+          <label class="inline-flex items-center gap-1.5">
+            <span>Рядків:</span>
+            <select id="pageSizeSelect" class="bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-2 py-1 text-xs font-semibold text-slate-700 dark:text-slate-200 cursor-pointer">
+              <option value="25" selected>25</option>
+              <option value="50">50</option>
+              <option value="100">100</option>
+              <option value="999999">Усі (скрол)</option>
+            </select>
+          </label>
+          <button type="button" id="prevPageBtn" class="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40 cursor-pointer">← Назад</button>
+          <span id="pageIndicator" class="px-2 font-semibold text-slate-700 dark:text-slate-200">1 / 1</span>
+          <button type="button" id="nextPageBtn" class="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40 cursor-pointer">Вперед →</button>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <script>
+    // =========================================================================
+    // 1. ПАЛІТРА КОЛЬОРІВ ТА КОНСТАНТИ
+    // =========================================================================
+    const PALETTE = [
+      '#4f46e5', '#10b981', '#f59e0b', '#8b5cf6', '#06b6d4',
+      '#ec4899', '#f97316', '#14b8a6', '#6366f1', '#84cc16',
+      '#ef4444', '#0ea5e9', '#a855f7', '#eab308', '#64748b'
+    ];
+
+    // =========================================================================
+    // 2. ДЕМО-НАБІР ДАНИХ
+    // =========================================================================
+    function createDemoDataset() {
+      const clients = [
+        { id: 'CL-101', managerRaw: 'Іваненко Олена', supportStage: 'Активний супровід', completedStage: 'В процесі', militaryStatusStart: 'УБД', consultStatusStart: 'Ветеран/ка', age: '26–35', channel: 'Гаряча лінія', gender: 'Чоловіча', oblast: 'Львівська', interestStart: 'Працевлаштування', requestsFlag: 'REQ-201, REQ-202', consultationsCount: 4, firstContactDate: '2026-10-02', closeDate: '', updatedAt: '2026-10-29' },
+        { id: 'CL-102', managerRaw: 'Петренко Максим', supportStage: 'Завершено', completedStage: 'Успішно завершено', militaryStatusStart: 'Військовослужбовець', consultStatusStart: 'Чинний військовий', age: '36–45', channel: 'Telegram / чат-бот', gender: 'Чоловіча', oblast: 'Київська', interestStart: 'Юридична допомога', requestsFlag: 'REQ-203', consultationsCount: 6, firstContactDate: '2026-09-10', closeDate: '2026-10-18', updatedAt: '2026-10-18' },
+        { id: 'CL-103', managerRaw: 'Іваненко Олена, Коваленко Ірина', supportStage: 'Активний супровід', completedStage: 'В процесі', militaryStatusStart: 'Член сім’ї', consultStatusStart: 'Член родини', age: '26–35', channel: 'Instagram / Facebook', gender: 'Жіноча', oblast: 'Дніпропетровська', interestStart: 'Психологічна підтримка', requestsFlag: 'REQ-204', consultationsCount: 3, firstContactDate: '2026-10-08', closeDate: '', updatedAt: '2026-10-25' },
+        { id: 'CL-104', managerRaw: 'Коваленко Ірина', supportStage: 'Завершено', completedStage: 'Перенаправлено', militaryStatusStart: 'УБД', consultStatusStart: 'Ветеран/ка', age: '46–55', channel: 'Рекомендація побратимів', gender: 'Чоловіча', oblast: 'Харківська', interestStart: 'Реабілітація та протезування', requestsFlag: 'REQ-205', consultationsCount: 5, firstContactDate: '2026-08-20', closeDate: '2026-10-05', updatedAt: '2026-10-05' },
+        { id: 'CL-105', managerRaw: 'Сидоренко Андрій', supportStage: 'Первинна оцінка', completedStage: 'В процесі', militaryStatusStart: 'Особа з інвалідністю внаслідок війни', consultStatusStart: 'Ветеран/ка', age: '26–35', channel: 'Вебсайт центру', gender: 'Чоловіча', oblast: 'Вінницька', interestStart: 'Гранти та власна справа', requestsFlag: '', consultationsCount: 2, firstContactDate: '2026-10-19', closeDate: '', updatedAt: '2026-10-20' },
+        { id: 'CL-106', managerRaw: 'Петренко Максим, Сидоренко Андрій', supportStage: 'Пауза', completedStage: 'Клієнт на паузі', militaryStatusStart: 'УБД', consultStatusStart: 'Ветеран/ка', age: '18–25', channel: 'Особистий візит', gender: 'Чоловіча', oblast: 'Львівська', interestStart: 'Навчання та перекваліфікація', requestsFlag: 'REQ-206', consultationsCount: 4, firstContactDate: '2026-09-01', closeDate: '', updatedAt: '2026-10-01' },
+        { id: 'CL-107', managerRaw: 'Іваненко Олена', supportStage: 'Завершено', completedStage: 'Успішно завершено', militaryStatusStart: 'Член сім’ї', consultStatusStart: 'Член родини', age: '36–45', channel: 'Гаряча лінія', gender: 'Жіноча', oblast: 'Одеська', interestStart: 'Соціальні виплати та пільги', requestsFlag: 'REQ-207', consultationsCount: 3, firstContactDate: '2026-10-01', closeDate: '2026-10-14', updatedAt: '2026-10-14' },
+        { id: 'CL-108', managerRaw: 'Коваленко Ірина', supportStage: 'Активний супровід', completedStage: 'В процесі', militaryStatusStart: 'УБД', consultStatusStart: 'Ветеран/ка', age: '36–45', channel: 'Telegram / чат-бот', gender: 'Чоловіча', oblast: 'Полтавська', interestStart: 'Працевлаштування', requestsFlag: 'REQ-208', consultationsCount: 7, firstContactDate: '2026-09-15', closeDate: '', updatedAt: '2026-10-30' }
+      ];
+
+      const requests = [
+        { requestId: 'REQ-201', clientId: 'CL-101', managerRaw: 'Іваненко Олена', responsibleKK: 'КК Бондар О.', executionStage: 'В роботі', requestType: 'Кар’єрне консультування', results: 'Підібрано вакансії', resolutionRating: 'Висока (5/5)', consultationsCount: 2, requestNumber: '1', createdDate: '2026-10-03', completedDate: '', updatedAt: '2026-10-29' },
+        { requestId: 'REQ-202', clientId: 'CL-101', managerRaw: 'Іваненко Олена', responsibleKK: 'КК Бондар О.', executionStage: 'Виконано', requestType: 'Юридичний супровід', results: 'Послугу надано, вирішено', resolutionRating: 'Висока (5/5)', consultationsCount: 2, requestNumber: '2', createdDate: '2026-10-05', completedDate: '2026-10-15', updatedAt: '2026-10-15' },
+        { requestId: 'REQ-203', clientId: 'CL-102', managerRaw: 'Петренко Максим', responsibleKK: 'КК Мельник Т.', executionStage: 'Виконано', requestType: 'Юридичний супровід', results: 'Послугу надано, вирішено', resolutionRating: 'Висока (5/5)', consultationsCount: 6, requestNumber: '1', createdDate: '2026-09-12', completedDate: '2026-10-18', updatedAt: '2026-10-18' },
+        { requestId: 'REQ-204', clientId: 'CL-103', managerRaw: 'Іваненко Олена, Коваленко Ірина', responsibleKK: 'КК Бондар О., КК Савчук В.', executionStage: 'В роботі', requestType: 'Психологічна допомога', results: 'Триває курс сесій', resolutionRating: 'Добра (4/5)', consultationsCount: 3, requestNumber: '1', createdDate: '2026-10-09', completedDate: '', updatedAt: '2026-10-25' },
+        { requestId: 'REQ-205', clientId: 'CL-104', managerRaw: 'Коваленко Ірина', responsibleKK: 'КК Савчук В.', executionStage: 'Виконано', requestType: 'Реабілітація', results: 'Скеровано до партнерів', resolutionRating: 'Висока (5/5)', consultationsCount: 5, requestNumber: '1', createdDate: '2026-08-22', completedDate: '2026-10-05', updatedAt: '2026-10-05' },
+        { requestId: 'REQ-206', clientId: 'CL-106', managerRaw: 'Петренко Максим, Сидоренко Андрій', responsibleKK: 'КК Мельник Т.', executionStage: 'Призупинено', requestType: 'Навчання / курси', results: 'Очікується відповідь клієнта', resolutionRating: 'Не оцінено', consultationsCount: null, requestNumber: '1', createdDate: '2026-09-03', completedDate: '', updatedAt: '2026-10-01' },
+        { requestId: 'REQ-207', clientId: 'CL-107', managerRaw: 'Іваненко Олена', responsibleKK: 'КК Бондар О.', executionStage: 'Виконано', requestType: 'Соціальний супровід', results: 'Послугу надано, вирішено', resolutionRating: 'Висока (5/5)', consultationsCount: 3, requestNumber: '1', createdDate: '2026-10-02', completedDate: '2026-10-14', updatedAt: '2026-10-14' },
+        { requestId: 'REQ-208', clientId: 'CL-108', managerRaw: 'Коваленко Ірина', responsibleKK: 'КК Савчук В.', executionStage: 'В роботі', requestType: 'Кар’єрне консультування', results: 'Підготовка резюме', resolutionRating: 'Добра (4/5)', consultationsCount: 7, requestNumber: '1', createdDate: '2026-09-16', completedDate: '', updatedAt: '2026-10-30' },
+        { requestId: 'REQ-209', clientId: 'CL-999', managerRaw: 'Сидоренко Андрій', responsibleKK: 'КК Мельник Т.', executionStage: 'Новий', requestType: 'Грантова підтримка', results: 'Первинний контакт', resolutionRating: 'Не оцінено', consultationsCount: null, requestNumber: '1', createdDate: '2026-10-27', completedDate: '', updatedAt: '2026-10-27' }
+      ];
+
+      const services = [
+        { serviceId: 'SRV-301', clientId: 'CL-101', requestId: 'REQ-201', managerRaw: 'Іваненко Олена', serviceStage: 'Надається', serviceType: 'Складання резюме та супровід співбесіди' },
+        { serviceId: 'SRV-302', clientId: 'CL-101', requestId: 'REQ-202', managerRaw: 'Іваненко Олена', serviceStage: 'Завершено', serviceType: 'Юридична консультація щодо пільг' },
+        { serviceId: 'SRV-303', clientId: 'CL-102', requestId: 'REQ-203', managerRaw: 'Петренко Максим', serviceStage: 'Завершено', serviceType: 'Оформлення документів УБД / виплат' },
+        { serviceId: 'SRV-304', clientId: 'CL-103', requestId: 'REQ-204', managerRaw: 'Коваленко Ірина', serviceStage: 'Надається', serviceType: 'Індивідуальна психологічна консультація' },
+        { serviceId: 'SRV-305', clientId: 'CL-104', requestId: 'REQ-205', managerRaw: 'Коваленко Ірина', serviceStage: 'Завершено', serviceType: 'Фізична реабілітація' },
+        { serviceId: 'SRV-306', clientId: 'CL-107', requestId: 'REQ-207', managerRaw: 'Іваненко Олена', serviceStage: 'Завершено', serviceType: 'Соціальний супровід сім’ї' },
+        { serviceId: 'SRV-307', clientId: 'CL-888', requestId: 'REQ-888', managerRaw: 'Сидоренко Андрій', serviceStage: 'Заплановано', serviceType: 'Бізнес-консультування по грантах' }
+      ];
+
+      return { clients, requests, services };
+    }
+
+    // =========================================================================
+    // 3. ГЛОБАЛЬНИЙ СТАН ДОДАТКУ
+    // =========================================================================
+    const initialData = createDemoDataset();
+    const state = {
+      clients: initialData.clients,
+      requests: initialData.requests,
+      services: initialData.services,
+      servicesColumns: [],        // Оригінальні назви колонок вкладки «Послуги» з файлу
+      activeTab: 'clients',       // 'clients' | 'requests' | 'services'
+      selectedManager: 'ALL',     // 'ALL' або ім'я конкретного менеджера
+      analysisDate: '2026-10-01', // Базова дата аналізу для діаграми #4 (Старий / Новий)
+      chartFilter: null,          // { id: string, label: string, predicate: fn | obj }
+      topLimits: {
+        c4: 10,
+        c5: 10,
+        c6: 10,
+        r17: 10,
+        r18: 10,
+        r19: 'ALL',
+        s27: 'ALL'
+      },
+      searchQuery: '',
+      currentPage: 1,
+      pageSize: 25
+    };
+
+    // =========================================================================
+    // 4. ДОПОМІЖНІ ФУНКЦІЇ ОБРОБКИ МЕНЕДЖЕРІВ, ДАТ ТА КЛАСИФІКАЦІЇ
+    // =========================================================================
+
+    function formatAxisLabel(raw, maxLen = 22) {
+      if (!raw) return '—';
+      let s = String(raw).trim();
+      if (s.includes(';') || s.includes(',')) {
+        const parts = s.split(/[;,]+/).map(p => {
+          const t = p.trim();
+          return t.includes('@') ? t.split('@')[0] : t;
+        }).filter(Boolean);
+        if (parts.length > 1) {
+          const compact = `${parts[0]} (+${parts.length - 1})`;
+          return compact.length > maxLen ? compact.slice(0, maxLen - 1) + '…' : compact;
+        }
+        if (parts.length === 1) {
+          s = parts[0];
+        }
+      }
+      if (s.includes('@')) s = s.split('@')[0];
+      if (s.length > maxLen) return s.slice(0, maxLen - 1) + '…';
+      return s;
+    }
+
+    // Класифікація колонки "Запити" у вкладці Клієнти для діаграми #14
+    function classifyClientRequestsCell(rawVal) {
+      if (rawVal === null || rawVal === undefined) return 'Немає запитів';
+      const str = String(rawVal).trim();
+      if (!str || str === '-' || str === '0' || str.toLowerCase() === 'немає' || str.toLowerCase() === 'без запитів') {
+        return 'Немає запитів';
+      }
+      if (str.toLowerCase() === 'є запити') return 'Є запити (1 запит)';
+      const items = str.split(/[\n;,]+/).map(x => x.trim()).filter(Boolean);
+      if (items.length <= 1) return 'Є запити (1 запит)';
+      if (items.length === 2) return 'Є запити (2 запити)';
+      return 'Є запити (3+ запити)';
+    }
+
+    // Нормалізація одного текстового значення категорії (регістр, пробіли, типові варіанти написання)
+    function normalizeCategoryLabel(rawItem, fallback = 'Не вказано') {
+      if (rawItem === null || rawItem === undefined) return fallback;
+      let cleaned = String(rawItem)
+        .replace(/[\u00A0\s]+/g, ' ')
+        .replace(/^[-–—•·.,;:\s]+|[-–—•·.,;:\s]+$/g, '')
+        .trim();
+      if (!cleaned) return fallback;
+
+      const lower = cleaned.toLowerCase();
+      // Уніфікація варіантів написання етапів супроводу / завершення (#5, #6)
+      if (lower === 'завершено' || lower === 'завершенно') return 'Завершено';
+      if (lower === 'в роботі') return 'В роботі';
+      if (lower === 'повторно в роботі') return 'Повторно в роботі';
+      if (lower === 'пауза') return 'Пауза';
+      if (lower === 'відмовився') return 'Відмовився';
+      if (lower === 'новий клієнт') return 'Новий клієнт';
+      if (lower === 'неактуально') return 'Неактуально';
+      if (lower === 'не виходить на зв\'язок' || lower === 'не виходить на зв’язок') return 'Не виходить на зв’язок';
+      if (lower === 'послуги надано') return 'Послуги надано';
+      if (lower === 'не вирішено запити') return 'Не вирішено запити';
+      if (lower === 'частково вирішено запити') return 'Частково вирішено запити';
+      if (lower === 'повністю вирішено запити') return 'Повністю вирішено запити';
+
+      // Приводимо першу літеру до верхнього регістру для однорідності підписів
+      return cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
+    }
+
+    // Розбиття клітинки з відповідальними ("Іваненко О.; Петренко М." -> ["Іваненко О.", "Петренко М."])
+    function parsePeopleList(raw) {
+      if (!raw) return ['Не вказано'];
+      const list = String(raw)
+        .split(/[,;/\n]+/)
+        .map(s => s.replace(/[\u00A0\s]+/g, ' ').trim().toLowerCase())
+        .filter(Boolean);
+      const unique = Array.from(new Set(list));
+      return unique.length > 0 ? unique : ['Не вказано'];
+    }
+
+    // Універсальне розбиття мультизначень у клітинці (наприклад: "супер; Звернення телефоном" -> ["Супер", "Звернення телефоном"])
+    function parseMultiValues(raw, fallback = 'Не вказано') {
+      if (raw === null || raw === undefined) return [fallback];
+      const str = String(raw).trim();
+      if (!str) return [fallback];
+      const parts = str
+        .split(/[;\n,]+/)
+        .map(s => normalizeCategoryLabel(s, ''))
+        .filter(Boolean);
+      const unique = Array.from(new Set(parts));
+      return unique.length > 0 ? unique : [fallback];
+    }
+
+    // Перевірка, чи підходить рядок під обраний глобальний фільтр "Відповідальний менеджер"
+    function matchesGlobalManager(row) {
+      if (state.selectedManager === 'ALL') return true;
+      const people = parsePeopleList(row.managerRaw);
+      return people.includes(state.selectedManager.toLowerCase());
+    }
+
+    // Повертає ключі групування менеджерів для діаграм #4, #5, #6:
+    // Кожен менеджер із клітинки (через ';', ',' тощо) рахується окремо без повторів.
+    function getManagerGroupsForChart(row) {
+      const people = parsePeopleList(row.managerRaw);
+      if (state.selectedManager === 'ALL') {
+        return people;
+      }
+      return people.filter(p => p === state.selectedManager.toLowerCase());
+    }
+
+    // Повертає ключі групування для "Відповідальний КК" (діаграми #17, #18)
+    function getResponsibleKKGroupsForChart(row) {
+      return parsePeopleList(row.responsibleKK);
+    }
+
+    // Статус Старий / Новий відносно вибраної "Дати аналізу" (діаграма #4)
+    function getClientOldNewStatus(client) {
+      if (!client.firstContactDate) return 'Дата не вказана';
+      if (!state.analysisDate) return 'Новий (після дати аналізу)';
+      if (client.firstContactDate < state.analysisDate) return 'Старий (до дати аналізу)';
+      if (client.firstContactDate > state.analysisDate) return 'Новий (після дати аналізу)';
+      return 'У дату аналізу';
+    }
+
+    function getFilteredClients() {
+      return state.clients.filter(matchesGlobalManager);
+    }
+
+    function getFilteredRequests() {
+      return state.requests.filter(matchesGlobalManager);
+    }
+
+    function getFilteredServices() {
+      return state.services.filter(matchesGlobalManager);
+    }
+
+    function diffDays(startStr, endStr, absVal = false) {
+      if (!startStr || !endStr) return null;
+      const d1 = new Date(startStr + 'T00:00:00');
+      const d2 = new Date(endStr + 'T00:00:00');
+      if (isNaN(d1.getTime()) || isNaN(d2.getTime())) return null;
+      const days = Math.round((d2.getTime() - d1.getTime()) / (1000 * 60 * 60 * 24));
+      if (absVal) return Math.abs(days);
+      return days < 0 ? null : days;
+    }
+
+    const DAY_BUCKETS = ['0–3 дні', '4–7 днів', '8–14 днів', '15–30 днів', '31–60 днів', '60+ днів'];
+    function bucketizeDays(days) {
+      if (days <= 3) return '0–3 дні';
+      if (days <= 7) return '4–7 днів';
+      if (days <= 14) return '8–14 днів';
+      if (days <= 30) return '15–30 днів';
+      if (days <= 60) return '31–60 днів';
+      return '60+ днів';
+    }
+
+    function showToast(msg, type = 'info') {
+      const box = document.getElementById('toastBox');
+      const text = document.getElementById('toastText');
+      text.textContent = msg;
+      box.classList.remove('hidden', 'bg-slate-900', 'bg-rose-900', 'bg-emerald-900', 'bg-amber-900');
+      if (type === 'error') box.classList.add('bg-rose-900');
+      else if (type === 'success') box.classList.add('bg-emerald-900');
+      else if (type === 'warning') box.classList.add('bg-amber-900');
+      else box.classList.add('bg-slate-900');
+      clearTimeout(window._toastTimer);
+      window._toastTimer = setTimeout(() => box.classList.add('hidden'), 6000);
+    }
+
+    function showSchemaWarningsModal(issues, foundSheetNames) {
+      const modal = document.getElementById('schemaWarningModal');
+      const body = document.getElementById('schemaWarningBody');
+      if (!issues || issues.length === 0) return;
+
+      const sheetsInfo = foundSheetNames && foundSheetNames.length
+        ? `<div class="p-3 rounded-xl bg-slate-100 dark:bg-slate-800 text-xs">
+             <span class="font-semibold text-slate-600 dark:text-slate-300">Знайдені вкладки у файлі:</span>
+             <span class="font-bold text-slate-900 dark:text-white ml-1">${foundSheetNames.join(', ')}</span>
+           </div>`
+        : '';
+
+      body.innerHTML = sheetsInfo + issues.map(item => `
+        <div class="p-3.5 rounded-xl border ${
+          item.level === 'error'
+            ? 'bg-rose-50/80 dark:bg-rose-950/30 border-rose-200 dark:border-rose-800/70'
+            : 'bg-amber-50/70 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800/70'
+        }">
+          <div class="font-bold text-slate-900 dark:text-white">${item.title}</div>
+          <div class="text-xs text-slate-600 dark:text-slate-300 mt-1 leading-relaxed">${item.details}</div>
+        </div>
+      `).join('');
+
+      modal.classList.remove('hidden');
+    }
+
+    function toggleChartFilter(filterId, label, predicate) {
+      if (state.chartFilter && state.chartFilter.id === filterId) {
+        state.chartFilter = null;
+      } else {
+        state.chartFilter = { id: filterId, label, predicate };
+      }
+      state.currentPage = 1;
+      renderDashboard();
+    }
+
+    // =========================================================================
+    // 5. TOOLTIP ДЛЯ D3 ДІАГРАМ
+    // =========================================================================
+    const tooltipEl = document.getElementById('chartTooltip');
+    function showTooltip(event, html) {
+      tooltipEl.innerHTML = html;
+      tooltipEl.classList.remove('opacity-0');
+      moveTooltip(event);
+    }
+    function moveTooltip(event) {
+      const clientX = event.touches ? event.touches[0].clientX : event.clientX;
+      const clientY = event.touches ? event.touches[0].clientY : event.clientY;
+      const pad = 14;
+      let left = clientX + pad;
+      let top = clientY + pad;
+      const rect = tooltipEl.getBoundingClientRect();
+      if (left + rect.width > window.innerWidth - 10) left = clientX - rect.width - pad;
+      if (top + rect.height > window.innerHeight - 10) top = clientY - rect.height - pad;
+      tooltipEl.style.left = `${Math.max(8, left)}px`;
+      tooltipEl.style.top = `${Math.max(8, top)}px`;
+    }
+    function hideTooltip() {
+      tooltipEl.classList.add('opacity-0');
+    }
+
+    // =========================================================================
+    // 6. УНІВЕРСАЛЬНІ БУДІВЕЛЬНИКИ ДІАГРАМ (D3.JS)
+    // =========================================================================
+    function buildCardShell(containerId, num, title, subtitle = '', extraBadge = '') {
+      const el = document.getElementById(containerId);
+      el.innerHTML = `
+        <div class="flex items-start justify-between gap-2 mb-3">
+          <div class="min-w-0">
+            <div class="flex items-center gap-2">
+              <span class="inline-flex items-center justify-center px-2 py-0.5 rounded-md text-[11px] font-extrabold bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 shrink-0">#${num}</span>
+              <h3 class="text-sm font-bold text-slate-900 dark:text-white leading-snug">${title}</h3>
+            </div>
+            ${subtitle ? `<p class="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">${subtitle}</p>` : ''}
+          </div>
+          ${extraBadge ? `<span class="shrink-0 text-[11px] font-semibold px-2 py-0.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">${extraBadge}</span>` : ''}
+        </div>
+        <div class="chart-body flex-1 flex flex-col justify-between min-h-[215px]"></div>
+      `;
+      return el.querySelector('.chart-body');
+    }
+
+    // 6.1. Стовпчаста діаграма з групуванням (Горизонтальний Stacked Bar з чіткими підписами осі та скролом)
+    function renderGroupedStackedBar({
+      containerId, num, title, subtitle, rows, getGroupKeys, getSeriesValues, filterPrefix, customColors = null
+    }) {
+      const body = buildCardShell(containerId, num, title, subtitle);
+
+      const groupMap = new Map();
+      const seriesSet = new Set();
+
+      rows.forEach(row => {
+        const rawSeriesList = getSeriesValues(row);
+        const seriesList = Array.from(new Set(
+          (Array.isArray(rawSeriesList) ? rawSeriesList : [rawSeriesList])
+            .map(v => normalizeCategoryLabel(v, 'Не вказано'))
+        ));
+        const groups = Array.from(new Set(getGroupKeys(row)));
+        groups.forEach(gKey => {
+          if (!groupMap.has(gKey)) {
+            groupMap.set(gKey, { rowCount: 0, series: new Map() });
+          }
+          const entry = groupMap.get(gKey);
+          entry.rowCount += 1;
+          seriesList.forEach(seriesVal => {
+            seriesSet.add(seriesVal);
+            entry.series.set(seriesVal, (entry.series.get(seriesVal) || 0) + 1);
+          });
+        });
+      });
+
+      const groups = Array.from(groupMap.keys());
+      const seriesKeys = Array.from(seriesSet);
+
+      if (groups.length === 0) {
+        body.innerHTML = `<div class="text-center text-xs text-slate-400 py-10">Немає даних для відображення</div>`;
+        return;
+      }
+
+      const colorScale = d3.scaleOrdinal()
+        .domain(seriesKeys)
+        .range(seriesKeys.map((k, idx) => (customColors && customColors[k]) ? customColors[k] : PALETTE[idx % PALETTE.length]));
+
+      const matrix = groups.map(gKey => {
+        const entry = groupMap.get(gKey);
+        const obj = { group: gKey, total: 0, rowCount: entry.rowCount };
+        seriesKeys.forEach(k => {
+          const val = entry.series.get(k) || 0;
+          obj[k] = val;
+          obj.total += val;
+        });
+        return obj;
+      }).sort((a, b) => b.total - a.total);
+
+      // Панель перемикання Топ-10 / Усі, якщо багато менеджерів / відповідальних КК
+      const limitVal = state.topLimits[filterPrefix] || 10;
+      let visibleMatrix = matrix;
+      if (matrix.length > 10) {
+        const controls = document.createElement('div');
+        controls.className = 'flex items-center justify-between gap-2 mb-2 pb-1.5 border-b border-slate-100 dark:border-slate-800';
+        controls.innerHTML = `
+          <span class="text-[11px] text-slate-500 dark:text-slate-400">
+            Показано <strong class="text-slate-800 dark:text-slate-200">${limitVal === 'ALL' ? matrix.length : Math.min(limitVal, matrix.length)}</strong> із ${matrix.length}
+          </span>
+          <div class="inline-flex rounded-lg bg-slate-100 dark:bg-slate-800 p-0.5 text-[11px] font-semibold">
+            <button type="button" data-limit="10" class="px-2 py-0.5 rounded-md transition cursor-pointer ${
+              limitVal === 10
+                ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-300 shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+            }">Топ-10</button>
+            <button type="button" data-limit="ALL" class="px-2 py-0.5 rounded-md transition cursor-pointer ${
+              limitVal === 'ALL'
+                ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-300 shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+            }">Усі (${matrix.length})</button>
+          </div>
+        `;
+        controls.querySelectorAll('button').forEach(btn => {
+          btn.onclick = () => {
+            const rawLim = btn.getAttribute('data-limit');
+            state.topLimits[filterPrefix] = rawLim === 'ALL' ? 'ALL' : Number(rawLim);
+            renderDashboard();
+          };
+        });
+        body.appendChild(controls);
+
+        if (limitVal !== 'ALL') {
+          visibleMatrix = matrix.slice(0, limitVal);
+        }
+      }
+
+      const maxTotal = Math.max(d3.max(matrix, d => d.total) || 1, 1);
+
+      // Горизонтальні стовпці з повними читабельними підписами та вертикальним скролом
+      const listContainer = document.createElement('div');
+      listContainer.className = 'space-y-2.5 max-h-[320px] overflow-y-auto pr-1.5 my-auto';
+
+      visibleMatrix.forEach(item => {
+        const rowWrap = document.createElement('div');
+        rowWrap.className = 'group';
+
+        const displayLabel = formatAxisLabel(item.group, 34);
+        const headerRow = document.createElement('div');
+        headerRow.className = 'flex items-center justify-between text-xs mb-1 gap-2';
+        headerRow.innerHTML = `
+          <span class="font-semibold text-slate-700 dark:text-slate-200 truncate" title="${item.group.replace(/"/g, '&quot;')}">${displayLabel}</span>
+          <span class="shrink-0 font-extrabold text-slate-900 dark:text-white">${item.total}</span>
+        `;
+        rowWrap.appendChild(headerRow);
+
+        const barTrack = document.createElement('div');
+        barTrack.className = 'w-full h-4 rounded-lg bg-slate-100 dark:bg-slate-800/90 overflow-hidden flex gap-[1px] p-[1px]';
+
+        seriesKeys.forEach(sKey => {
+          const val = item[sKey] || 0;
+          if (val <= 0) return;
+          const widthPct = (val / maxTotal) * 100;
+          const fId = `${filterPrefix}:${item.group}:${sKey}`;
+          const isDimmed = state.chartFilter && state.chartFilter.id.startsWith(filterPrefix) && state.chartFilter.id !== fId && state.chartFilter.id !== `${filterPrefix}:ALL:${sKey}`;
+
+          const seg = document.createElement('button');
+          seg.type = 'button';
+          seg.style.width = `${Math.max(widthPct, 1.5)}%`;
+          seg.style.backgroundColor = colorScale(sKey);
+          seg.className = `h-full first:rounded-l-md last:rounded-r-md transition-opacity cursor-pointer hover:brightness-110 ${isDimmed ? 'opacity-30' : 'opacity-100'}`;
+
+          seg.addEventListener('mouseenter', e => {
+            showTooltip(e, `
+              <div class="font-bold text-white break-words">${item.group}</div>
+              <div class="text-slate-300 mt-0.5">${sKey}: <strong class="text-white">${val}</strong> із ${item.total}</div>
+            `);
+          });
+          seg.addEventListener('mousemove', moveTooltip);
+          seg.addEventListener('mouseleave', hideTooltip);
+          seg.addEventListener('click', () => {
+            toggleChartFilter(
+              fId,
+              `${title}: ${item.group} → ${sKey}`,
+              row => {
+                const rowGroups = getGroupKeys(row);
+                const rawList = getSeriesValues(row);
+                const list = (Array.isArray(rawList) ? rawList : [rawList])
+                  .map(v => normalizeCategoryLabel(v, 'Не вказано'));
+                return rowGroups.includes(item.group) && list.includes(sKey);
+              }
+            );
+          });
+
+          barTrack.appendChild(seg);
+        });
+
+        rowWrap.appendChild(barTrack);
+        listContainer.appendChild(rowWrap);
+      });
+
+      body.appendChild(listContainer);
+
+      // Інтерактивна легенда серій
+      const legend = document.createElement('div');
+      legend.className = 'mt-3 pt-2 border-t border-slate-100 dark:border-slate-800 flex flex-wrap gap-1.5 max-h-[86px] overflow-y-auto pr-1';
+      seriesKeys.forEach(k => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        const fId = `${filterPrefix}:ALL:${k}`;
+        const isActive = state.chartFilter && state.chartFilter.id === fId;
+        btn.className = `inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] transition cursor-pointer ${
+          isActive
+            ? 'bg-indigo-100 dark:bg-indigo-900 text-indigo-800 dark:text-indigo-200 font-bold'
+            : 'bg-slate-100/80 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200/70 dark:hover:bg-slate-700'
+        }`;
+        btn.title = k;
+        btn.innerHTML = `<span class="w-2 h-2 rounded-full shrink-0" style="background:${colorScale(k)}"></span><span class="truncate max-w-[155px]">${k}</span>`;
+        btn.onclick = () => {
+          toggleChartFilter(
+            fId,
+            `${title}: ${k}`,
+            row => {
+              const rawList = getSeriesValues(row);
+              const list = (Array.isArray(rawList) ? rawList : [rawList])
+                .map(v => normalizeCategoryLabel(v, 'Не вказано'));
+              return list.includes(k);
+            }
+          );
+        };
+        legend.appendChild(btn);
+      });
+      body.appendChild(legend);
+    }
+
+    // 6.2. Кругова / Кільцева діаграма (Donut Chart)
+    function renderDonutChart({
+      containerId, num, title, subtitle, items, filterPrefix, getRowPredicate, legendMaxHeight = 'max-h-[175px]'
+    }) {
+      const body = buildCardShell(containerId, num, title, subtitle);
+      const isDark = document.documentElement.classList.contains('dark');
+      const total = items.reduce((s, d) => s + d.count, 0);
+
+      if (total === 0) {
+        body.innerHTML = `<div class="text-center text-xs text-slate-400 py-10">Немає даних для відображення</div>`;
+        return;
+      }
+
+      const wrapper = document.createElement('div');
+      wrapper.className = 'flex flex-col items-center justify-between gap-3 h-full';
+      body.appendChild(wrapper);
+
+      const chartBox = document.createElement('div');
+      chartBox.className = 'w-[172px] h-[172px] flex items-center justify-center shrink-0 my-auto';
+      wrapper.appendChild(chartBox);
+
+      const size = 172;
+      const radius = size / 2;
+
+      const svg = d3.select(chartBox)
+        .append('svg')
+        .attr('width', size)
+        .attr('height', size)
+        .append('g')
+        .attr('transform', `translate(${radius},${radius})`);
+
+      const dynamicPad = items.length > 20 ? 0 : items.length > 10 ? 0.01 : 0.025;
+      const pie = d3.pie().value(d => d.count).sort(null).padAngle(dynamicPad);
+      const arc = d3.arc().innerRadius(radius * 0.58).outerRadius(radius * 0.92).cornerRadius(items.length > 15 ? 1 : 4);
+      const arcHover = d3.arc().innerRadius(radius * 0.58).outerRadius(radius * 0.98).cornerRadius(items.length > 15 ? 1 : 4);
+
+      svg.append('text')
+        .attr('text-anchor', 'middle')
+        .attr('dy', '-0.25em')
+        .attr('fill', isDark ? '#94a3b8' : '#64748b')
+        .attr('font-size', '10px')
+        .text('Усього');
+
+      svg.append('text')
+        .attr('text-anchor', 'middle')
+        .attr('dy', '1.05em')
+        .attr('fill', isDark ? '#f8fafc' : '#0f172a')
+        .attr('font-size', '16px')
+        .attr('font-weight', '800')
+        .text(total);
+
+      svg.selectAll('path')
+        .data(pie(items))
+        .enter()
+        .append('path')
+        .attr('d', arc)
+        .attr('fill', (d, i) => d.data.color || PALETTE[i % PALETTE.length])
+        .attr('class', 'cursor-pointer transition-opacity')
+        .style('opacity', d => {
+          const fId = `${filterPrefix}:${d.data.label}`;
+          if (!state.chartFilter || !state.chartFilter.id.startsWith(filterPrefix)) return 1;
+          return state.chartFilter.id === fId ? 1 : 0.3;
+        })
+        .on('mouseenter touchstart', function (event, d) {
+          d3.select(this).transition().duration(130).attr('d', arcHover);
+          const pct = ((d.data.count / total) * 100).toFixed(1);
+          showTooltip(event, `
+            <div class="font-bold text-white">${d.data.label}</div>
+            <div class="text-slate-300 mt-0.5">Кількість: <strong class="text-white">${d.data.count}</strong> (${pct}%)</div>
+          `);
+        })
+        .on('mousemove touchmove', moveTooltip)
+        .on('mouseleave', function () {
+          d3.select(this).transition().duration(130).attr('d', arc);
+          hideTooltip();
+        })
+        .on('click', (event, d) => {
+          const fId = `${filterPrefix}:${d.data.label}`;
+          toggleChartFilter(fId, `${title}: ${d.data.label}`, getRowPredicate(d.data));
+        });
+
+      const legend = document.createElement('div');
+      legend.className = `w-full space-y-1 ${legendMaxHeight} overflow-y-auto pr-1`;
+      items.forEach((item, i) => {
+        const color = item.color || PALETTE[i % PALETTE.length];
+        const pct = ((item.count / total) * 100).toFixed(1);
+        const fId = `${filterPrefix}:${item.label}`;
+        const isActive = state.chartFilter && state.chartFilter.id === fId;
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = `w-full flex items-center justify-between px-2 py-1 rounded-lg text-xs transition cursor-pointer ${
+          isActive
+            ? 'bg-indigo-50 dark:bg-indigo-950/80 ring-1 ring-indigo-500/40 font-semibold'
+            : 'hover:bg-slate-50 dark:hover:bg-slate-800/70'
+        }`;
+        btn.innerHTML = `
+          <span class="flex items-center gap-2 min-w-0 pr-2">
+            <span class="w-2.5 h-2.5 rounded-full shrink-0" style="background:${color}"></span>
+            <span class="truncate text-slate-700 dark:text-slate-200" title="${item.label}">${item.label}</span>
+          </span>
+          <span class="shrink-0 flex items-center gap-1.5">
+            <span class="text-slate-400 text-[11px]">${pct}%</span>
+            <span class="font-bold text-slate-900 dark:text-white">${item.count}</span>
+          </span>
+        `;
+        btn.onclick = () => toggleChartFilter(fId, `${title}: ${item.label}`, getRowPredicate(item));
+        legend.appendChild(btn);
+      });
+      wrapper.appendChild(legend);
+    }
+
+    // 6.3. Стовпчаста діаграма (Вертикальна або Горизонтальна)
+    function renderBarChart({
+      containerId, num, title, subtitle, extraBadge = '', items, horizontal = false,
+      filterPrefix, getRowPredicate, topLimitKey = null, scrollHeightClass = 'max-h-[360px]',
+      axisLabelFormatter = null
+    }) {
+      const body = buildCardShell(containerId, num, title, subtitle, extraBadge);
+      const isDark = document.documentElement.classList.contains('dark');
+      const total = items.reduce((s, d) => s + d.count, 0);
+
+      if (items.length === 0 || total === 0) {
+        body.innerHTML = `<div class="text-center text-xs text-slate-400 py-10">Немає даних для відображення</div>`;
+        return;
+      }
+
+      if (horizontal) {
+        let visibleItems = items;
+        const limitVal = topLimitKey ? state.topLimits[topLimitKey] : null;
+
+        if (topLimitKey && items.length > 10) {
+          const controls = document.createElement('div');
+          controls.className = 'flex items-center justify-between gap-2 mb-2.5 pb-2 border-b border-slate-100 dark:border-slate-800';
+          controls.innerHTML = `
+            <span class="text-[11px] text-slate-500 dark:text-slate-400">
+              Показано <strong class="text-slate-800 dark:text-slate-200">${limitVal === 'ALL' ? items.length : Math.min(limitVal, items.length)}</strong> із ${items.length}
+            </span>
+            <div class="inline-flex rounded-lg bg-slate-100 dark:bg-slate-800 p-0.5 text-[11px] font-semibold">
+              <button type="button" data-limit="10" class="px-2.5 py-1 rounded-md transition cursor-pointer ${
+                limitVal === 10
+                  ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-300 shadow-xs'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              }">Топ-10</button>
+              <button type="button" data-limit="ALL" class="px-2.5 py-1 rounded-md transition cursor-pointer ${
+                limitVal === 'ALL'
+                  ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-300 shadow-xs'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              }">Усі (${items.length})</button>
+            </div>
+          `;
+          controls.querySelectorAll('button').forEach(btn => {
+            btn.onclick = () => {
+              const rawLim = btn.getAttribute('data-limit');
+              state.topLimits[topLimitKey] = rawLim === 'ALL' ? 'ALL' : Number(rawLim);
+              renderDashboard();
+            };
+          });
+          body.appendChild(controls);
+
+          if (limitVal !== 'ALL') {
+            visibleItems = items.slice(0, limitVal);
+          }
+        }
+
+        const list = document.createElement('div');
+        const needsScroll = visibleItems.length > 8;
+        list.className = `space-y-2 my-auto ${needsScroll ? `${scrollHeightClass} overflow-y-auto pr-1.5` : ''}`;
+        const maxVal = Math.max(...items.map(d => d.count), 1);
+
+        visibleItems.forEach((item, i) => {
+          const pctOfMax = Math.max(4, Math.round((item.count / maxVal) * 100));
+          const pctOfTotal = ((item.count / total) * 100).toFixed(1);
+          const color = item.color || PALETTE[i % PALETTE.length];
+          const fId = `${filterPrefix}:${item.label}`;
+          const isActive = state.chartFilter && state.chartFilter.id === fId;
+          const isDimmed = state.chartFilter && state.chartFilter.id.startsWith(filterPrefix) && !isActive;
+
+          const rowBtn = document.createElement('button');
+          rowBtn.type = 'button';
+          rowBtn.className = `w-full text-left group p-1.5 rounded-xl transition cursor-pointer ${
+            isActive ? 'bg-indigo-50/90 dark:bg-indigo-950/70 ring-1 ring-indigo-500/40' : 'hover:bg-slate-50 dark:hover:bg-slate-800/50'
+          } ${isDimmed ? 'opacity-40' : ''}`;
+
+          rowBtn.innerHTML = `
+            <div class="flex items-center justify-between text-xs mb-1 gap-2">
+              <span class="font-medium text-slate-700 dark:text-slate-200 truncate" title="${item.label}">${item.label}</span>
+              <span class="shrink-0 font-bold text-slate-900 dark:text-white">
+                ${item.count} <span class="font-normal text-slate-400 text-[11px]">(${pctOfTotal}%)</span>
+              </span>
+            </div>
+            <div class="w-full h-2.5 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
+              <div class="h-full rounded-full transition-all duration-500" style="width:${pctOfMax}%; background:${color}"></div>
+            </div>
+          `;
+          rowBtn.onclick = () => toggleChartFilter(fId, `${title}: ${item.label}`, getRowPredicate(item));
+          list.appendChild(rowBtn);
+        });
+        body.appendChild(list);
+        return;
+      }
+
+      // Вертикальна стовпчаста діаграма D3
+      const needsRotation = items.length > 4 || items.some(d => String(d.label).length > 9);
+      const chartHeight = needsRotation ? 265 : 235;
+      const chartDiv = document.createElement('div');
+      chartDiv.className = 'w-full overflow-hidden my-auto';
+      chartDiv.style.height = `${chartHeight}px`;
+      body.appendChild(chartDiv);
+
+      const width = Math.max(chartDiv.getBoundingClientRect().width, 260);
+      const margin = {
+        top: 22,
+        right: 14,
+        bottom: needsRotation ? 78 : 44,
+        left: 42
+      };
+      const innerW = Math.max(width - margin.left - margin.right, 160);
+      const innerH = chartHeight - margin.top - margin.bottom;
+
+      const svg = d3.select(chartDiv).append('svg').attr('width', width).attr('height', chartHeight);
+      const g = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+
+      const x = d3.scaleBand()
+        .domain(items.map(d => d.label))
+        .range([0, innerW])
+        .padding(items.length > 10 ? 0.24 : 0.34);
+
+      const maxVal = Math.max(d3.max(items, d => d.count) || 1, 1);
+      const y = d3.scaleLinear().domain([0, maxVal * 1.18]).nice().range([innerH, 0]);
+
+      g.append('g')
+        .call(d3.axisLeft(y).ticks(4).tickSize(-innerW).tickFormat(''))
+        .call(ax => ax.select('.domain').remove())
+        .call(ax => ax.selectAll('line').attr('stroke', isDark ? '#1e293b' : '#f1f5f9'));
+
+      g.append('g')
+        .call(d3.axisLeft(y).ticks(4).tickFormat(d3.format('d')))
+        .call(ax => ax.select('.domain').remove())
+        .call(ax => ax.selectAll('line').remove())
+        .call(ax => ax.selectAll('text').attr('fill', isDark ? '#94a3b8' : '#64748b').attr('font-size', '10px'));
+
+      const maxTickLen = items.length > 12 ? 9 : items.length > 7 ? 12 : 15;
+      const xAxis = g.append('g')
+        .attr('transform', `translate(0,${innerH})`)
+        .call(d3.axisBottom(x).tickFormat(d => {
+          const custom = axisLabelFormatter ? axisLabelFormatter(d) : d;
+          return formatAxisLabel(custom, maxTickLen);
+        }))
+        .call(ax => ax.select('.domain').attr('stroke', isDark ? '#334155' : '#e2e8f0'))
+        .call(ax => ax.selectAll('line').remove());
+
+      const xLabels = xAxis.selectAll('text')
+        .attr('fill', isDark ? '#94a3b8' : '#475569')
+        .attr('font-size', items.length > 12 ? '9.5px' : '10px')
+        .attr('font-weight', '600');
+
+      if (needsRotation) {
+        xLabels
+          .attr('dx', '-0.45em')
+          .attr('dy', '0.35em')
+          .attr('transform', 'rotate(-38)')
+          .style('text-anchor', 'end');
+      } else {
+        xLabels
+          .attr('dy', '0.75em')
+          .style('text-anchor', 'middle');
+      }
+
+      xLabels.append('title').text(d => d);
+
+      g.selectAll('.v-bar')
+        .data(items)
+        .enter()
+        .append('rect')
+        .attr('x', d => x(d.label))
+        .attr('y', d => y(d.count))
+        .attr('width', x.bandwidth())
+        .attr('height', d => Math.max(0, innerH - y(d.count)))
+        .attr('rx', Math.min(6, x.bandwidth() / 3))
+        .attr('fill', (d, i) => d.color || PALETTE[i % PALETTE.length])
+        .attr('class', 'cursor-pointer transition-opacity')
+        .style('opacity', d => {
+          const fId = `${filterPrefix}:${d.label}`;
+          if (!state.chartFilter || !state.chartFilter.id.startsWith(filterPrefix)) return 1;
+          return state.chartFilter.id === fId ? 1 : 0.3;
+        })
+        .on('mouseenter touchstart', function (event, d) {
+          const pct = ((d.count / total) * 100).toFixed(1);
+          showTooltip(event, `
+            <div class="font-bold text-white">${d.label}</div>
+            <div class="text-slate-300 mt-0.5">Кількість: <strong class="text-white">${d.count}</strong> (${pct}%)</div>
+          `);
+        })
+        .on('mousemove touchmove', moveTooltip)
+        .on('mouseleave', hideTooltip)
+        .on('click', (event, d) => {
+          const fId = `${filterPrefix}:${d.label}`;
+          toggleChartFilter(fId, `${title}: ${d.label}`, getRowPredicate(d));
+        });
+
+      g.selectAll('.v-bar-label')
+        .data(items)
+        .enter()
+        .append('text')
+        .attr('x', d => x(d.label) + x.bandwidth() / 2)
+        .attr('y', d => y(d.count) - 5)
+        .attr('text-anchor', 'middle')
+        .attr('fill', isDark ? '#e2e8f0' : '#1e293b')
+        .attr('font-size', items.length > 14 ? '9px' : '10px')
+        .attr('font-weight', '700')
+        .text(d => d.count);
+    }
+
+    function groupCounts(rows, getter, { sortByCount = true, fixedOrder = null, colorMap = null } = {}) {
+      const map = new Map();
+      if (fixedOrder) fixedOrder.forEach(k => map.set(k, 0));
+
+      rows.forEach(r => {
+        const rawVal = getter(r);
+        if (rawVal === null || rawVal === undefined) return;
+        const values = Array.from(new Set(Array.isArray(rawVal) ? rawVal : [rawVal]));
+        values.forEach(item => {
+          if (item === null || item === undefined) return;
+          const val = typeof item === 'string' ? normalizeCategoryLabel(item, 'Не вказано') : item;
+          map.set(val, (map.get(val) || 0) + 1);
+        });
+      });
+
+      let arr = Array.from(map.entries()).map(([label, count], idx) => ({
+        label,
+        count,
+        color: colorMap && colorMap[label] ? colorMap[label] : PALETTE[idx % PALETTE.length]
+      }));
+
+      if (sortByCount && !fixedOrder) {
+        arr.sort((a, b) => b.count - a.count);
+      }
+      return arr;
+    }
+
+    // =========================================================================
+    // 7. РЕНДЕР ВКЛАДКИ 1: КЛІЄНТИ (#1 - #16)
+    // =========================================================================
+    function renderClientsTab() {
+      const clients = getFilteredClients();
+      const requests = getFilteredRequests();
+      const services = getFilteredServices();
+
+      // #1, #2, #3 KPI
+      document.getElementById('kpi-clients').textContent = clients.length.toLocaleString('uk-UA');
+      document.getElementById('kpi-requests').textContent = requests.length.toLocaleString('uk-UA');
+      document.getElementById('kpi-consultations').textContent = services.length.toLocaleString('uk-UA');
+
+      // #4 Стовпчаста: кількість клієнтів по кожному менеджеру з розбивкою старий/новий відносно Дата аналізу
+      renderGroupedStackedBar({
+        containerId: 'card-c4',
+        num: 4,
+        title: 'Клієнти по менеджерах: Старий / Новий',
+        subtitle: `Старий: Дата першого звернення < ${state.analysisDate}; Новий: > ${state.analysisDate}`,
+        rows: clients,
+        getGroupKeys: getManagerGroupsForChart,
+        getSeriesValues: c => [getClientOldNewStatus(c)],
+        customColors: {
+          'Старий (до дати аналізу)': '#6366f1',
+          'Новий (після дати аналізу)': '#10b981',
+          'У дату аналізу': '#06b6d4',
+          'Дата не вказана': '#94a3b8'
+        },
+        filterPrefix: 'c4'
+      });
+
+      // #5 Стовпчаста: кількість клієнтів по кожному менеджеру з розбивкою Етап супроводу
+      renderGroupedStackedBar({
+        containerId: 'card-c5',
+        num: 5,
+        title: 'Клієнти по менеджерах: Етап супроводу',
+        subtitle: 'Колонка «Етап супроводу» (розбиття мультизначень)',
+        rows: clients,
+        getGroupKeys: getManagerGroupsForChart,
+        getSeriesValues: c => parseMultiValues(c.supportStage),
+        filterPrefix: 'c5'
+      });
+
+      // #6 Стовпчаста: кількість клієнтів по кожному менеджеру з розбивкою НА ЯКОМУ ЕТАПІ ЗАВЕРШЕНО
+      renderGroupedStackedBar({
+        containerId: 'card-c6',
+        num: 6,
+        title: 'Клієнти по менеджерах: На якому етапі завершено',
+        subtitle: 'Колонка «На якому етапі завершено» (розбиття мультизначень)',
+        rows: clients,
+        getGroupKeys: getManagerGroupsForChart,
+        getSeriesValues: c => parseMultiValues(c.completedStage),
+        filterPrefix: 'c6'
+      });
+
+      // #7 Кругова: Військовий статус на ПОЧАТОК супроводу
+      renderDonutChart({
+        containerId: 'card-c7',
+        num: 7,
+        title: 'Військовий статус на ПОЧАТОК супроводу',
+        subtitle: 'Кількість клієнтів за військовим статусом',
+        items: groupCounts(clients, c => parseMultiValues(c.militaryStatusStart)),
+        filterPrefix: 'c7',
+        getRowPredicate: item => c => parseMultiValues(c.militaryStatusStart).includes(item.label)
+      });
+
+      // #8 Кругова: Статус клієнта на початок консультування
+      renderDonutChart({
+        containerId: 'card-c8',
+        num: 8,
+        title: 'Статус клієнта на початок консультування',
+        subtitle: 'Колонка «Статус клієнта на початок консультування»',
+        items: groupCounts(clients, c => parseMultiValues(c.consultStatusStart)),
+        filterPrefix: 'c8',
+        getRowPredicate: item => c => parseMultiValues(c.consultStatusStart).includes(item.label)
+      });
+
+      // #11 Кругова: Стать
+      renderDonutChart({
+        containerId: 'card-c11',
+        num: 11,
+        title: 'Стать',
+        subtitle: 'Розподіл клієнтів за статтю',
+        items: groupCounts(clients, c => parseMultiValues(c.gender), {
+          colorMap: { 'Чоловіча': '#4f46e5', 'Жіноча': '#ec4899', 'Не вказано': '#94a3b8' }
+        }),
+        filterPrefix: 'c11',
+        getRowPredicate: item => c => parseMultiValues(c.gender).includes(item.label)
+      });
+
+      // #14 Кругова: Запити
+      const reqPresenceOrder = ['Є запити (1 запит)', 'Є запити (2 запити)', 'Є запити (3+ запити)', 'Немає запитів'];
+      const reqPresenceItems = groupCounts(clients, c => classifyClientRequestsCell(c.requestsFlag), {
+        sortByCount: false,
+        colorMap: {
+          'Є запити (1 запит)': '#10b981',
+          'Є запити (2 запити)': '#4f46e5',
+          'Є запити (3+ запити)': '#8b5cf6',
+          'Немає запитів': '#f59e0b'
+        }
+      }).sort((a, b) => reqPresenceOrder.indexOf(a.label) - reqPresenceOrder.indexOf(b.label));
+
+      renderDonutChart({
+        containerId: 'card-c14',
+        num: 14,
+        title: 'Запити',
+        subtitle: 'Колонка «Запити» у вкладці Клієнти',
+        items: reqPresenceItems,
+        filterPrefix: 'c14',
+        getRowPredicate: item => c => classifyClientRequestsCell(c.requestsFlag) === item.label
+      });
+
+      // #9 Стовпчаста: кількість клієнтів по ВІК
+      const ageItems = groupCounts(clients, c => parseMultiValues(c.age), { sortByCount: false });
+      ageItems.sort((a, b) => a.label.localeCompare(b.label, 'uk', { numeric: true }));
+      renderBarChart({
+        containerId: 'card-c9',
+        num: 9,
+        title: 'Кількість клієнтів по ВІК',
+        subtitle: 'Вікові категорії клієнтів',
+        items: ageItems,
+        horizontal: false,
+        filterPrefix: 'c9',
+        getRowPredicate: item => c => parseMultiValues(c.age).includes(item.label)
+      });
+
+      // #10 Стовпчаста: кількість клієнтів по Канал першого звернення
+      renderBarChart({
+        containerId: 'card-c10',
+        num: 10,
+        title: 'Кількість клієнтів по Канал першого звернення',
+        subtitle: 'Джерела першого контакту (значення через «;» чи «,» рахуються окремо)',
+        items: groupCounts(clients, c => parseMultiValues(c.channel)),
+        horizontal: true,
+        filterPrefix: 'c10',
+        getRowPredicate: item => c => parseMultiValues(c.channel).includes(item.label)
+      });
+
+      // #12 Стовпчаста: кількість клієнтів по Область
+      renderBarChart({
+        containerId: 'card-c12',
+        num: 12,
+        title: 'Кількість клієнтів по Область',
+        subtitle: 'Розподіл клієнтів за областями',
+        items: groupCounts(clients, c => parseMultiValues(c.oblast)),
+        horizontal: true,
+        filterPrefix: 'c12',
+        getRowPredicate: item => c => parseMultiValues(c.oblast).includes(item.label)
+      });
+
+      // #13 Стовпчаста: кількість клієнтів по Що цікавить на момент першого звернення
+      renderBarChart({
+        containerId: 'card-c13',
+        num: 13,
+        title: 'Що цікавить на момент першого звернення',
+        subtitle: 'Первинні потреби (значення через «;» чи «,» рахуються окремо)',
+        items: groupCounts(clients, c => parseMultiValues(c.interestStart)),
+        horizontal: true,
+        filterPrefix: 'c13',
+        getRowPredicate: item => c => parseMultiValues(c.interestStart).includes(item.label)
+      });
+
+      // #15 Стовпчаста: Тривалість супроводу (Дата закриття відняти Дата першого звернення в днях). Якщо дати закриття немає — не враховувати
+      const closedClients = clients.filter(c => diffDays(c.firstContactDate, c.closeDate) !== null);
+      const avgSupportDays = closedClients.length
+        ? Math.round(closedClients.reduce((s, c) => s + diffDays(c.firstContactDate, c.closeDate), 0) / closedClients.length)
+        : 0;
+
+      renderBarChart({
+        containerId: 'card-c15',
+        num: 15,
+        title: 'Тривалість супроводу (в днях)',
+        subtitle: 'Дата закриття − Дата першого звернення (якщо дати закриття немає — не враховувати)',
+        extraBadge: closedClients.length ? `Середнє: ${avgSupportDays} дн. (n=${closedClients.length})` : 'Немає закритих',
+        items: groupCounts(
+          closedClients,
+          c => bucketizeDays(diffDays(c.firstContactDate, c.closeDate)),
+          { fixedOrder: DAY_BUCKETS }
+        ),
+        horizontal: false,
+        filterPrefix: 'c15',
+        getRowPredicate: item => c => {
+          const d = diffDays(c.firstContactDate, c.closeDate);
+          return d !== null && bucketizeDays(d) === item.label;
+        }
+      });
+
+      // #16 Стовпчаста: Відсутність апдейту в днях — модуль різниці між <Updated At> (Клієнти) та Дата аналізу
+      const clientsWithDiff16 = clients.filter(c => diffDays(c.updatedAt, state.analysisDate, true) !== null);
+      const avgDiff16 = clientsWithDiff16.length
+        ? Math.round(clientsWithDiff16.reduce((s, c) => s + diffDays(c.updatedAt, state.analysisDate, true), 0) / clientsWithDiff16.length)
+        : 0;
+
+      renderBarChart({
+        containerId: 'card-c16',
+        num: 16,
+        title: 'Відсутність апдейту: |<Updated At> − Дата аналізу| (клієнти)',
+        subtitle: `Модуль різниці в днях між <Updated At> та Дата аналізу (${state.analysisDate})`,
+        extraBadge: clientsWithDiff16.length ? `Середнє: ${avgDiff16} дн. (n=${clientsWithDiff16.length})` : 'Немає дат',
+        items: groupCounts(
+          clientsWithDiff16,
+          c => bucketizeDays(diffDays(c.updatedAt, state.analysisDate, true)),
+          { fixedOrder: DAY_BUCKETS }
+        ),
+        horizontal: false,
+        filterPrefix: 'c16',
+        getRowPredicate: item => c => {
+          const d = diffDays(c.updatedAt, state.analysisDate, true);
+          return d !== null && bucketizeDays(d) === item.label;
+        }
+      });
+    }
+
+    // =========================================================================
+    // 8. РЕНДЕР ВКЛАДКИ 2: ЗАПИТИ (#17 - #25)
+    // =========================================================================
+    function renderRequestsTab() {
+      const clients = getFilteredClients();
+      const requests = getFilteredRequests();
+
+      // #17 Стовпчаста: кількість запитів по колонці Відповідальний КК з розбивкою по колонці Етап виконання запиту
+      renderGroupedStackedBar({
+        containerId: 'card-r17',
+        num: 17,
+        title: 'Запити по Відповідальний КК: Етап виконання запиту',
+        subtitle: 'Групування за колонкою «Відповідальний КК» та «Етап виконання запиту»',
+        rows: requests,
+        getGroupKeys: getResponsibleKKGroupsForChart,
+        getSeriesValues: r => parseMultiValues(r.executionStage),
+        filterPrefix: 'r17'
+      });
+
+      // #18 Стовпчаста: кількість запитів по колонці Відповідальний КК з розбивкою по колонці Тип запиту
+      renderGroupedStackedBar({
+        containerId: 'card-r18',
+        num: 18,
+        title: 'Запити по Відповідальний КК: Тип запиту',
+        subtitle: 'Групування за колонкою «Відповідальний КК» та «Тип запиту»',
+        rows: requests,
+        getGroupKeys: getResponsibleKKGroupsForChart,
+        getSeriesValues: r => parseMultiValues(r.requestType),
+        filterPrefix: 'r18'
+      });
+
+      // #19 Стовпчаста: кількість запитів по РЕЗУЛЬТАТИ
+      renderBarChart({
+        containerId: 'card-r19',
+        num: 19,
+        title: 'Кількість запитів по РЕЗУЛЬТАТИ',
+        subtitle: 'Колонка «РЕЗУЛЬТАТИ»',
+        items: groupCounts(requests, r => parseMultiValues(r.results)),
+        horizontal: true,
+        topLimitKey: 'r19',
+        scrollHeightClass: 'max-h-[360px]',
+        filterPrefix: 'r19',
+        getRowPredicate: item => r => parseMultiValues(r.results).includes(item.label)
+      });
+
+      // #20 Стовпчаста: кількість запитів по Оцінка вирішення запиту
+      renderBarChart({
+        containerId: 'card-r20',
+        num: 20,
+        title: 'Кількість запитів по Оцінка вирішення запиту',
+        subtitle: 'Колонка «Оцінка вирішення запиту»',
+        items: groupCounts(requests, r => parseMultiValues(r.resolutionRating)),
+        horizontal: true,
+        scrollHeightClass: 'max-h-[360px]',
+        filterPrefix: 'r20',
+        getRowPredicate: item => r => parseMultiValues(r.resolutionRating).includes(item.label)
+      });
+
+      // #21 Стовпчаста: кількість запитів по Загальна кількість консультацій. Окремо — немає (пусті клітинки)
+      const consultBuckets = groupCounts(
+        requests,
+        r => {
+          if (r.consultationsCount === null || r.consultationsCount === undefined || String(r.consultationsCount).trim() === '') {
+            return 'Немає (пусті клітинки)';
+          }
+          const numVal = Number(r.consultationsCount);
+          return !isNaN(numVal) ? `${numVal} конс.` : String(r.consultationsCount).trim();
+        },
+        {
+          sortByCount: false,
+          colorMap: { 'Немає (пусті клітинки)': '#f59e0b' }
+        }
+      );
+      consultBuckets.sort((a, b) => {
+        if (a.label === 'Немає (пусті клітинки)') return -1;
+        if (b.label === 'Немає (пусті клітинки)') return 1;
+        return parseInt(a.label, 10) - parseInt(b.label, 10);
+      });
+
+      renderBarChart({
+        containerId: 'card-r21',
+        num: 21,
+        title: 'Запити по Загальна кількість консультацій',
+        subtitle: 'Окремо виділено пусті клітинки — «Немає (пусті клітинки)»',
+        items: consultBuckets,
+        horizontal: false,
+        axisLabelFormatter: lbl => (lbl === 'Немає (пусті клітинки)' ? 'Немає (пусто)' : lbl.replace(' конс.', ' к.')),
+        filterPrefix: 'r21',
+        getRowPredicate: item => r => {
+          const isEmpty = r.consultationsCount === null || r.consultationsCount === undefined || String(r.consultationsCount).trim() === '';
+          if (item.label === 'Немає (пусті клітинки)') return isEmpty;
+          const numVal = Number(r.consultationsCount);
+          const formatted = !isNaN(numVal) ? `${numVal} конс.` : String(r.consultationsCount).trim();
+          return !isEmpty && formatted === item.label;
+        }
+      });
+
+      // #22 Стовпчаста: кількість запитів по Номер запиту
+      const reqNumItems = groupCounts(requests, r => String(r.requestNumber || 'Не вказано'), { sortByCount: false });
+      reqNumItems.sort((a, b) => a.label.localeCompare(b.label, 'uk', { numeric: true }));
+
+      renderBarChart({
+        containerId: 'card-r22',
+        num: 22,
+        title: 'Кількість запитів по Номер запиту',
+        subtitle: 'Колонка «Номер запиту»',
+        items: reqNumItems,
+        horizontal: false,
+        filterPrefix: 'r22',
+        getRowPredicate: item => r => String(r.requestNumber || 'Не вказано').replace(/\s+/g, ' ').trim() === item.label
+      });
+
+      // #23 Стовпчаста: Тривалість запиту (Дата завершення запиту - Дата створення запиту в днях). Якщо дати завершення немає — не враховувати!
+      const completedReqs = requests.filter(r => diffDays(r.createdDate, r.completedDate) !== null);
+      const avgReqDays = completedReqs.length
+        ? Math.round(completedReqs.reduce((s, r) => s + diffDays(r.createdDate, r.completedDate), 0) / completedReqs.length)
+        : 0;
+
+      renderBarChart({
+        containerId: 'card-r23',
+        num: 23,
+        title: 'Тривалість запиту (в днях)',
+        subtitle: 'Дата завершення запиту − Дата створення запиту (без дати завершення не враховано)',
+        extraBadge: completedReqs.length ? `Середнє: ${avgReqDays} дн. (n=${completedReqs.length})` : 'Немає завершених',
+        items: groupCounts(
+          completedReqs,
+          r => bucketizeDays(diffDays(r.createdDate, r.completedDate)),
+          { fixedOrder: DAY_BUCKETS }
+        ),
+        horizontal: false,
+        filterPrefix: 'r23',
+        getRowPredicate: item => r => {
+          const d = diffDays(r.createdDate, r.completedDate);
+          return d !== null && bucketizeDays(d) === item.label;
+        }
+      });
+
+      // #24 Стовпчаста: Відсутність апдейту — різниця в днях за модулем між <Updated At> (Запити) та Дата аналізу
+      const reqsWithDiff24 = requests.filter(r => diffDays(r.updatedAt, state.analysisDate, true) !== null);
+      const avgDiff24 = reqsWithDiff24.length
+        ? Math.round(reqsWithDiff24.reduce((s, r) => s + diffDays(r.updatedAt, state.analysisDate, true), 0) / reqsWithDiff24.length)
+        : 0;
+
+      renderBarChart({
+        containerId: 'card-r24',
+        num: 24,
+        title: 'Відсутність апдейту: |<Updated At> − Дата аналізу| (запити)',
+        subtitle: `Модуль різниці між <Updated At> та Дата аналізу (${state.analysisDate})`,
+        extraBadge: reqsWithDiff24.length ? `Середнє: ${avgDiff24} дн. (n=${reqsWithDiff24.length})` : 'Немає дат',
+        items: groupCounts(
+          reqsWithDiff24,
+          r => bucketizeDays(diffDays(r.updatedAt, state.analysisDate, true)),
+          { fixedOrder: DAY_BUCKETS }
+        ),
+        horizontal: false,
+        filterPrefix: 'r24',
+        getRowPredicate: item => r => {
+          const d = diffDays(r.updatedAt, state.analysisDate, true);
+          return d !== null && bucketizeDays(d) === item.label;
+        }
+      });
+
+      // #25 Кругова діаграма: Наявність клієнта в запитах (3 точні категорії)
+      const clientIdsInClients = new Set(clients.map(c => String(c.id || '').trim()).filter(Boolean));
+      const clientIdsInRequests = new Set(requests.map(r => String(r.clientId || '').trim()).filter(Boolean));
+
+      const inReqAndCli = Array.from(clientIdsInRequests).filter(id => clientIdsInClients.has(id)).length;
+      const inReqOnly = Array.from(clientIdsInRequests).filter(id => !clientIdsInClients.has(id)).length;
+      const inCliOnly = Array.from(clientIdsInClients).filter(id => !clientIdsInRequests.has(id)).length;
+
+      const items25 = [
+        { label: 'Є клієнт в Запитах і в Клієнтах', count: inReqAndCli, color: '#10b981', mode: 'both' },
+        { label: 'Є клієнт в Запитах, нема в Клієнтах', count: inReqOnly, color: '#ef4444', mode: 'reqOnly' },
+        { label: 'Є клієнт в Клієнтах, нема в Запитах', count: inCliOnly, color: '#f59e0b', mode: 'cliOnly' }
+      ];
+
+      renderDonutChart({
+        containerId: 'card-r25',
+        num: 25,
+        title: 'Наявність клієнта в запитах',
+        subtitle: 'Звірка ID клієнта між вкладками «Запити» та «Клієнти»',
+        items: items25,
+        filterPrefix: 'r25',
+        getRowPredicate: item => {
+          if (item.mode === 'both') {
+            return r => r.clientId && clientIdsInClients.has(String(r.clientId).trim());
+          }
+          if (item.mode === 'reqOnly') {
+            return r => r.clientId && !clientIdsInClients.has(String(r.clientId).trim());
+          }
+          return {
+            overrideSource: 'clients',
+            fn: c => !clientIdsInRequests.has(String(c.id).trim())
+          };
+        }
+      });
+    }
+
+    // =========================================================================
+    // 9. РЕНДЕР ВКЛАДКИ 3: ПОСЛУГИ (#26 - #28)
+    // =========================================================================
+    function renderServicesTab() {
+      const clients = getFilteredClients();
+      const requests = getFilteredRequests();
+      const services = getFilteredServices();
+
+      // #26 Кругова діаграма для колонки Етап послуги (усі категорії)
+      renderDonutChart({
+        containerId: 'card-s26',
+        num: 26,
+        title: 'Етап послуги',
+        subtitle: 'Усі категорії з колонки «Етап послуги» (вкладка «Послуги»)',
+        legendMaxHeight: 'max-h-[260px]',
+        items: groupCounts(services, s => parseMultiValues(s.serviceStage), {
+          colorMap: {
+            'Завершено': '#10b981',
+            'Виконано': '#10b981',
+            'Надається': '#4f46e5',
+            'В процесі': '#4f46e5',
+            'Заплановано': '#f59e0b',
+            'Скасовано': '#ef4444',
+            'Не вказано': '#94a3b8'
+          }
+        }),
+        filterPrefix: 's26',
+        getRowPredicate: item => s => parseMultiValues(s.serviceStage).includes(item.label)
+      });
+
+      // #27 Стовпчаста діаграма для колонки Тип послуги (усі категорії за замовчуванням)
+      renderBarChart({
+        containerId: 'card-s27',
+        num: 27,
+        title: 'Тип послуги',
+        subtitle: 'Усі категорії з колонки «Тип послуги» (вкладка «Послуги»)',
+        items: groupCounts(services, s => parseMultiValues(s.serviceType)),
+        horizontal: true,
+        topLimitKey: 's27',
+        scrollHeightClass: 'max-h-[380px]',
+        filterPrefix: 's27',
+        getRowPredicate: item => s => parseMultiValues(s.serviceType).includes(item.label)
+      });
+
+      // #28 Кругова діаграма: Наявність клієнта і запиту в послугах (6 точних категорій)
+      const clientIdsInClients = new Set(clients.map(c => String(c.id || '').trim()).filter(Boolean));
+      const clientIdsInServices = new Set(services.map(s => String(s.clientId || '').trim()).filter(Boolean));
+      const reqIdsInRequests = new Set(requests.map(r => String(r.requestId || '').trim()).filter(Boolean));
+      const reqIdsInServices = new Set(services.map(s => String(s.requestId || '').trim()).filter(Boolean));
+
+      const cSrvAndCli = Array.from(clientIdsInServices).filter(id => clientIdsInClients.has(id)).length;
+      const cSrvOnly = Array.from(clientIdsInServices).filter(id => !clientIdsInClients.has(id)).length;
+      const cCliOnly = Array.from(clientIdsInClients).filter(id => !clientIdsInServices.has(id)).length;
+
+      const rReqOnly = Array.from(reqIdsInRequests).filter(id => !reqIdsInServices.has(id)).length;
+      const rSrvOnly = Array.from(reqIdsInServices).filter(id => !reqIdsInRequests.has(id)).length;
+      const rSrvAndReq = Array.from(reqIdsInServices).filter(id => reqIdsInRequests.has(id)).length;
+
+      const items28 = [
+        { label: 'Є клієнт в Послугах і в Клієнтах', count: cSrvAndCli, color: '#10b981', mode: 'c_both' },
+        { label: 'Є клієнт в Послугах, нема в Клієнтах', count: cSrvOnly, color: '#ef4444', mode: 'c_srv_only' },
+        { label: 'Є клієнт в Клієнтах, нема в Послугах', count: cCliOnly, color: '#f59e0b', mode: 'c_cli_only' },
+        { label: 'Є запит в Запитах, нема в Послугах', count: rReqOnly, color: '#8b5cf6', mode: 'r_req_only' },
+        { label: 'Є запит в Послугах, нема в Запитах', count: rSrvOnly, color: '#ec4899', mode: 'r_srv_only' },
+        { label: 'Є запит і в Послугах, і в Запитах', count: rSrvAndReq, color: '#06b6d4', mode: 'r_both' }
+      ];
+
+      renderDonutChart({
+        containerId: 'card-s28',
+        num: 28,
+        title: 'Наявність клієнта і запиту в послугах',
+        subtitle: 'Перехресна звірка ID клієнта та ID запиту між трьома вкладками',
+        legendMaxHeight: 'max-h-[225px]',
+        items: items28,
+        filterPrefix: 's28',
+        getRowPredicate: item => {
+          if (item.mode === 'c_both') {
+            return s => s.clientId && clientIdsInClients.has(String(s.clientId).trim());
+          }
+          if (item.mode === 'c_srv_only') {
+            return s => s.clientId && !clientIdsInClients.has(String(s.clientId).trim());
+          }
+          if (item.mode === 'c_cli_only') {
+            return { overrideSource: 'clients', fn: c => !clientIdsInServices.has(String(c.id).trim()) };
+          }
+          if (item.mode === 'r_req_only') {
+            return { overrideSource: 'requests', fn: r => !reqIdsInServices.has(String(r.requestId).trim()) };
+          }
+          if (item.mode === 'r_srv_only') {
+            return s => s.requestId && !reqIdsInRequests.has(String(s.requestId).trim());
+          }
+          return s => s.requestId && reqIdsInRequests.has(String(s.requestId).trim());
+        }
+      });
+    }
+
+    // =========================================================================
+    // 10. ІНТЕРАКТИВНА СКРОЛ-ТАБЛИЦЯ ДАНИХ ПІД ГРАФІКАМИ
+    // =========================================================================
+    function getTableDataset() {
+      let sourceType = state.activeTab;
+      let rows = [];
+
+      if (state.chartFilter && typeof state.chartFilter.predicate === 'object' && state.chartFilter.predicate.overrideSource) {
+        sourceType = state.chartFilter.predicate.overrideSource;
+        const base = sourceType === 'clients' ? getFilteredClients() : sourceType === 'requests' ? getFilteredRequests() : getFilteredServices();
+        rows = base.filter(state.chartFilter.predicate.fn);
+      } else {
+        rows = sourceType === 'clients' ? getFilteredClients() : sourceType === 'requests' ? getFilteredRequests() : getFilteredServices();
+        if (state.chartFilter && typeof state.chartFilter.predicate === 'function') {
+          rows = rows.filter(state.chartFilter.predicate);
+        }
+      }
+
+      if (state.searchQuery.trim() !== '') {
+        const q = state.searchQuery.toLowerCase().trim();
+        rows = rows.filter(r => Object.values(r).some(v => String(v || '').toLowerCase().includes(q)));
+      }
+
+      return { sourceType, rows };
+    }
+
+    function renderDataTable() {
+      const { sourceType, rows } = getTableDataset();
+      const head = document.getElementById('dataTableHead');
+      const body = document.getElementById('dataTableBody');
+
+      const titles = {
+        clients: 'Таблиця даних: Клієнти',
+        requests: 'Таблиця даних: Запити',
+        services: 'Таблиця даних: Послуги'
+      };
+      document.getElementById('tableSectionTitle').textContent = titles[sourceType];
+      document.getElementById('tableFilteredCount').textContent = `${rows.length} зап.`;
+
+      const columnsConfig = {
+        clients: [
+          { key: 'id', label: 'ID клієнта' },
+          { key: 'managerRaw', label: 'Відповідальний менеджер' },
+          { key: 'supportStage', label: 'Етап супроводу' },
+          { key: 'completedStage', label: 'Етап завершення' },
+          { key: 'militaryStatusStart', label: 'Військовий статус' },
+          { key: 'oblast', label: 'Область' },
+          { key: 'consultationsCount', label: 'Консультацій' },
+          { key: 'firstContactDate', label: 'Перше звернення' },
+          { key: 'closeDate', label: 'Дата закриття' },
+          { key: 'updatedAt', label: 'Updated At' }
+        ],
+        requests: [
+          { key: 'requestId', label: 'ID запиту' },
+          { key: 'clientId', label: 'ID клієнта' },
+          { key: 'managerRaw', label: 'Відповідальний менеджер' },
+          { key: 'responsibleKK', label: 'Відповідальний КК' },
+          { key: 'executionStage', label: 'Етап виконання' },
+          { key: 'requestType', label: 'Тип запиту' },
+          { key: 'results', label: 'РЕЗУЛЬТАТИ' },
+          { key: 'resolutionRating', label: 'Оцінка вирішення' },
+          { key: 'consultationsCount', label: 'Консультацій' },
+          { key: 'createdDate', label: 'Створено' },
+          { key: 'completedDate', label: 'Завершено' },
+          { key: 'updatedAt', label: 'Updated At' }
+        ],
+        services: [
+          { key: 'serviceId', label: 'ID послуги' },
+          { key: 'clientId', label: 'ID клієнта' },
+          { key: 'requestId', label: 'ID запиту' },
+          { key: 'managerRaw', label: 'Відповідальний менеджер' },
+          { key: 'serviceStage', label: 'Етап послуги' },
+          { key: 'serviceType', label: 'Тип послуги' }
+        ]
+      };
+
+      let cols = columnsConfig[sourceType];
+      // Для вкладки «Послуги» відображаємо точні колонки з аркуша «Послуги» у файлі
+      if (sourceType === 'services') {
+        if (state.servicesColumns && state.servicesColumns.length > 0) {
+          cols = state.servicesColumns.map(colName => ({ key: colName, label: colName }));
+        } else if (rows.length > 0) {
+          const sampleKeys = Object.keys(rows[0]).filter(k => !k.startsWith('_'));
+          cols = sampleKeys.map(k => ({ key: k, label: k }));
+        }
+      }
+
+      head.innerHTML = `<tr>${cols.map(c => `<th class="px-4 py-3 whitespace-nowrap">${c.label}</th>`).join('')}</tr>`;
+
+      const totalPages = Math.max(1, Math.ceil(rows.length / state.pageSize));
+      if (state.currentPage > totalPages) state.currentPage = totalPages;
+
+      const startIdx = (state.currentPage - 1) * state.pageSize;
+      const pageRows = rows.slice(startIdx, startIdx + state.pageSize);
+
+      if (pageRows.length === 0) {
+        body.innerHTML = `<tr><td colspan="${cols.length}" class="px-4 py-10 text-center text-slate-400">Записів за обраними фільтрами не знайдено</td></tr>`;
+      } else {
+        body.innerHTML = pageRows.map((r, idx) => `
+          <tr data-row-idx="${startIdx + idx}" class="hover:bg-indigo-50/50 dark:hover:bg-slate-800/70 transition cursor-pointer">
+            ${cols.map(c => {
+              const val = r[c.key] === null || r[c.key] === undefined || r[c.key] === '' ? '—' : r[c.key];
+              return `<td class="px-4 py-3 whitespace-nowrap max-w-[230px] truncate text-slate-700 dark:text-slate-200" title="${String(val).replace(/"/g, '&quot;')}">${val}</td>`;
+            }).join('')}
+          </tr>
+        `).join('');
+
+        body.querySelectorAll('tr').forEach(tr => {
+          tr.onclick = () => {
+            const rIdx = Number(tr.getAttribute('data-row-idx'));
+            openRecordModal(rows[rIdx], sourceType);
+          };
+        });
+      }
+
+      const shownFrom = rows.length === 0 ? 0 : startIdx + 1;
+      const shownTo = Math.min(startIdx + state.pageSize, rows.length);
+      document.getElementById('paginationInfo').textContent = `Показано ${shownFrom}–${shownTo} із ${rows.length}`;
+      document.getElementById('pageIndicator').textContent = `${state.currentPage} / ${totalPages}`;
+      document.getElementById('prevPageBtn').disabled = state.currentPage <= 1;
+      document.getElementById('nextPageBtn').disabled = state.currentPage >= totalPages;
+    }
+
+    function openRecordModal(row, sourceType) {
+      if (!row) return;
+      const modal = document.getElementById('recordModal');
+      const modalTitle = document.getElementById('modalTitle');
+      const modalBody = document.getElementById('modalBody');
+
+      const labelMap = {
+        id: 'ID клієнта',
+        requestId: 'ID запиту',
+        serviceId: 'ID послуги',
+        clientId: 'ID клієнта',
+        managerRaw: 'Відповідальний менеджер',
+        responsibleKK: 'Відповідальний КК',
+        supportStage: 'Етап супроводу',
+        completedStage: 'На якому етапі завершено',
+        militaryStatusStart: 'Військовий статус на початок супроводу',
+        consultStatusStart: 'Статус клієнта на початок консультування',
+        age: 'Вік',
+        channel: 'Канал першого звернення',
+        gender: 'Стать',
+        oblast: 'Область',
+        interestStart: 'Що цікавить на момент першого звернення',
+        requestsFlag: 'Запити',
+        consultationsCount: 'Загальна кількість консультацій',
+        firstContactDate: 'Дата першого звернення',
+        closeDate: 'Дата закриття',
+        updatedAt: 'Updated At',
+        executionStage: 'Етап виконання запиту',
+        requestType: 'Тип запиту',
+        results: 'РЕЗУЛЬТАТИ',
+        resolutionRating: 'Оцінка вирішення запиту',
+        requestNumber: 'Номер запиту',
+        createdDate: 'Дата створення запиту',
+        completedDate: 'Дата завершення запиту',
+        serviceStage: 'Етап послуги',
+        serviceType: 'Тип послуги'
+      };
+
+      const titleId = row.id || row.requestId || row.serviceId || '';
+      modalTitle.textContent = `Картка запису (${sourceType === 'clients' ? 'Клієнт' : sourceType === 'requests' ? 'Запит' : 'Послуга'}) • ${titleId}`;
+
+      modalBody.innerHTML = Object.entries(row).map(([k, v]) => `
+        <div class="flex flex-col sm:flex-row sm:justify-between gap-1 py-2 border-b border-slate-100 dark:border-slate-800">
+          <span class="text-xs font-semibold text-slate-500 dark:text-slate-400">${labelMap[k] || k}</span>
+          <span class="text-xs sm:text-sm font-medium text-slate-900 dark:text-white sm:text-right break-words">${v === null || v === undefined || v === '' ? '—' : v}</span>
+        </div>
+      `).join('');
+
+      modal.classList.remove('hidden');
+    }
+
+    // =========================================================================
+    // 11. ПАРСИНГ EXCEL (.XLSX / .XLS / .CSV) ЧЕРЕЗ SHEETJS
+    // =========================================================================
+    function formatExcelCellRaw(val) {
+      if (val === null || val === undefined) return '';
+      if (val instanceof Date && !isNaN(val.getTime())) {
+        return val.toISOString().slice(0, 10);
+      }
+      return String(val).trim();
+    }
+
+    function excelSerialToDateStr(val) {
+      if (val === null || val === undefined || val === '') return '';
+      if (val instanceof Date && !isNaN(val.getTime())) {
+        return val.toISOString().slice(0, 10);
+      }
+      if (typeof val === 'number' && val > 20000 && val < 80000) {
+        const utcDays = Math.floor(val - 25569);
+        const date = new Date(utcDays * 86400 * 1000);
+        if (!isNaN(date.getTime())) return date.toISOString().slice(0, 10);
+      }
+      const s = String(val).trim();
+      let m = s.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
+      if (m) return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
+      m = s.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{4})/);
+      if (m) return `${m[3]}-${m[1].padStart(2, '0')}-${m[2].padStart(2, '0')}`;
+      return '';
+    }
+
+    function normalizeHeaderKey(k) {
+      return String(k)
+        .replace(/[<>«»"'`]/g, '')
+        .replace(/[_-]+/g, ' ')
+        .replace(/[\s\u00A0]+/g, ' ')
+        .trim()
+        .toLowerCase();
+    }
+
+    function findColumnKey(rowObj, candidates, exactOnly = false) {
+      if (!rowObj) return undefined;
+      const keys = Object.keys(rowObj);
+      for (const cand of candidates) {
+        const normCand = normalizeHeaderKey(cand);
+        const exact = keys.find(k => normalizeHeaderKey(k) === normCand);
+        if (exact !== undefined) return exact;
+      }
+      if (!exactOnly) {
+        for (const cand of candidates) {
+          const normCand = normalizeHeaderKey(cand);
+          const partial = keys.find(k => normalizeHeaderKey(k).includes(normCand));
+          if (partial !== undefined) return partial;
+        }
+      }
+      return undefined;
+    }
+
+    function pickField(rowObj, candidates, exactOnly = false) {
+      const k = findColumnKey(rowObj, candidates, exactOnly);
+      return k !== undefined ? rowObj[k] : '';
+    }
+
+    function parseSheetWithSmartHeader(sheet) {
+      if (!sheet) return [];
+      const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+      if (rows.length > 1) {
+        const firstKeys = Object.keys(rows[0]);
+        const emptyCount = firstKeys.filter(k => k.startsWith('__EMPTY')).length;
+        if (emptyCount > firstKeys.length / 2) {
+          return XLSX.utils.sheet_to_json(sheet, { range: 1, defval: '' });
+        }
+      }
+      return rows;
+    }
+
+    // Спеціальний парсер для аркуша «Послуги»:
+    // 1) Якщо є шапка заголовків — читає 1-в-1 з неї.
+    // 2) Якщо аркуш без шапки (перший рядок уже містить дані) — автоматично визначає колонки за змістом значень
+    //    (ID послуги, ID клієнта, ID запиту, Відповідальний, Дати, Тип послуги, Етап послуги тощо) і не втрачає перший рядок.
+    function parseServicesSheetSmart(sheet) {
+      if (!sheet) return { rows: [], headless: false, headers: [] };
+      const matrix = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: false }).filter(
+        r => Array.isArray(r) && r.some(cell => String(cell).trim() !== '')
+      );
+      if (matrix.length === 0) return { rows: [], headless: false, headers: [] };
+
+      const firstRowNorm = matrix[0].map(c => normalizeHeaderKey(c));
+      const headerKeywords = ['id послуги', 'етап послуги', 'тип послуги', 'id клієнта', 'id запиту', 'послуга'];
+      const hasHeaderRow = firstRowNorm.some(cell => headerKeywords.some(kw => cell.includes(kw)));
+
+      if (hasHeaderRow) {
+        const rawHeaders = matrix[0].map((h, i) => {
+          const clean = String(h ?? '').trim();
+          return clean || `Колонка ${i + 1}`;
+        });
+        const rows = matrix.slice(1).map(r => {
+          const obj = {};
+          rawHeaders.forEach((h, i) => {
+            obj[h] = formatExcelCellRaw(r[i]);
+          });
+          return obj;
+        });
+        return { rows, headless: false, headers: rawHeaders };
+      }
+
+      // Визначаємо ролі колонок у таблиці без заголовків за статистикою значень по всіх рядках
+      const colCount = Math.max(...matrix.map(r => r.length));
+      const colStats = Array.from({ length: colCount }, (_, colIdx) => {
+        const vals = matrix.map(r => String(r[colIdx] ?? '').trim()).filter(Boolean);
+        const hexCount = vals.filter(v => /^[0-9a-f]{24}$/i.test(v)).length;
+        const emailCount = vals.filter(v => v.includes('@')).length;
+        const dateCount = vals.filter(v => /^\d{1,4}[./-]\d{1,2}[./-]\d{1,4}/.test(v)).length;
+        const yesNoCount = vals.filter(v => /^(є|немає|так|ні|yes|no)$/i.test(v)).length;
+        const textVals = vals.filter(v => !/^[0-9a-f]{24}$/i.test(v) && !v.includes('@') && !/^\d{1,4}[./-]\d{1,2}[./-]\d{1,4}/.test(v) && !/^(є|немає|так|ні|yes|no)$/i.test(v));
+        const uniqueText = new Set(textVals);
+        return { colIdx, vals, hexCount, emailCount, dateCount, yesNoCount, textVals, uniqueText };
+      });
+
+      const assignedNames = new Array(colCount).fill(null);
+
+      // 1. Перші три 24-символьні ID: ID послуги, ID клієнта, ID запиту
+      const hexCols = colStats.filter(s => s.hexCount > matrix.length * 0.4);
+      if (hexCols[0]) assignedNames[hexCols[0].colIdx] = 'ID послуги';
+      if (hexCols[1]) assignedNames[hexCols[1].colIdx] = 'ID клієнта';
+      if (hexCols[2]) assignedNames[hexCols[2].colIdx] = 'ID запиту';
+
+      // 2. Колонка з email — Відповідальний менеджер
+      const emailCol = colStats.find(s => assignedNames[s.colIdx] === null && s.emailCount > 0);
+      if (emailCol) assignedNames[emailCol.colIdx] = 'Відповідальний менеджер';
+
+      // 3. Колонки з датами
+      let dateCounter = 1;
+      colStats.forEach(s => {
+        if (assignedNames[s.colIdx] === null && s.dateCount > matrix.length * 0.4) {
+          const hasTime = s.vals.some(v => v.includes(':'));
+          assignedNames[s.colIdx] = hasTime ? 'Updated At' : `Дата ${dateCounter++}`;
+        }
+      });
+
+      // 4. Текстові категоріальні колонки (Тип послуги та Етап послуги)
+      const stageKeywords = ['виконано', 'завершено', 'надається', 'в роботі', 'в процесі', 'заплановано', 'скасовано', 'новий', 'відмова', 'пауза'];
+      const textCols = colStats.filter(s => assignedNames[s.colIdx] === null && s.textVals.length > matrix.length * 0.3);
+
+      const stageCol = textCols.find(s =>
+        s.textVals.some(v => stageKeywords.some(kw => v.toLowerCase().includes(kw)))
+      );
+      if (stageCol) assignedNames[stageCol.colIdx] = 'Етап послуги';
+
+      const typeCol = textCols.find(s => assignedNames[s.colIdx] === null);
+      if (typeCol) assignedNames[typeCol.colIdx] = 'Тип послуги';
+
+      // 5. Решта службових колонок (напр. ознаки "є" / "є_1")
+      let flagIdx = 1;
+      for (let i = 0; i < colCount; i++) {
+        if (!assignedNames[i]) {
+          assignedNames[i] = `Колонка ${flagIdx++}`;
+        }
+      }
+
+      const rows = matrix.map(r => {
+        const obj = {};
+        assignedNames.forEach((colName, idx) => {
+          obj[colName] = formatExcelCellRaw(r[idx]);
+        });
+        return obj;
+      });
+
+      return { rows, headless: true, headers: assignedNames };
+    }
+
+    function processWorkbook(workbook, sourceDisplayName) {
+      const sheetNames = workbook.SheetNames || [];
+      const schemaIssues = [];
+
+      // Перевірка точних назв вкладок: "Клієнти", "Запити", "Послуги"
+      const matchSheet = (exactName, fallbackKeywords, customParser = null) => {
+        const exact = sheetNames.find(n => normalizeHeaderKey(n) === exactName.toLowerCase());
+        if (exact) {
+          const parsed = customParser ? customParser(workbook.Sheets[exact]) : { rows: parseSheetWithSmartHeader(workbook.Sheets[exact]), headless: false, headers: [] };
+          return { name: exact, isExact: true, rows: parsed.rows, headless: parsed.headless, headers: parsed.headers || [] };
+        }
+        const approx = sheetNames.find(n => fallbackKeywords.some(kw => normalizeHeaderKey(n).includes(kw)));
+        if (approx) {
+          const parsed = customParser ? customParser(workbook.Sheets[approx]) : { rows: parseSheetWithSmartHeader(workbook.Sheets[approx]), headless: false, headers: [] };
+          return { name: approx, isExact: false, rows: parsed.rows, headless: parsed.headless, headers: parsed.headers || [] };
+        }
+        return { name: null, isExact: false, rows: [], headless: false, headers: [] };
+      };
+
+      const clientsSheet = matchSheet('Клієнти', ['клієнт', 'client']);
+      const requestsSheet = matchSheet('Запити', ['запит', 'request']);
+      const servicesSheet = matchSheet('Послуги', ['послуг', 'service'], parseServicesSheetSmart);
+
+      [
+        { expected: 'Клієнти', res: clientsSheet },
+        { expected: 'Запити', res: requestsSheet },
+        { expected: 'Послуги', res: servicesSheet }
+      ].forEach(({ expected, res }) => {
+        if (!res.name) {
+          schemaIssues.push({
+            level: 'error',
+            title: `Відсутня вкладка «${expected}»`,
+            details: `У файлі не знайдено аркуш із назвою «${expected}». Дані для цього розділу залишаться порожніми.`
+          });
+        } else if (!res.isExact) {
+          schemaIssues.push({
+            level: 'warning',
+            title: `Змінено назву вкладки «${expected}» → «${res.name}»`,
+            details: `Очікувалась точна назва вкладки «${expected}», але знайдено «${res.name}». Дані підключено автоматично.`
+          });
+        }
+      });
+
+      const rawClients = clientsSheet.rows;
+      const rawRequests = requestsSheet.rows;
+      const rawServices = servicesSheet.rows;
+
+      if (rawClients.length === 0 && rawRequests.length === 0 && rawServices.length === 0) {
+        showSchemaWarningsModal(schemaIssues, sheetNames);
+        showToast('У документі не знайдено даних у вкладках «Клієнти», «Запити» або «Послуги».', 'error');
+        return;
+      }
+
+      // Перевірка очікуваних колонок у кожній вкладці
+      const checkExpectedColumns = (sheetLabel, sampleRow, specs) => {
+        if (!sampleRow) return;
+        const missing = [];
+        specs.forEach(spec => {
+          const foundKey = findColumnKey(sampleRow, spec.aliases, spec.exactOnly || false);
+          if (!foundKey) missing.push(`«${spec.label}»`);
+        });
+        if (missing.length > 0) {
+          schemaIssues.push({
+            level: 'warning',
+            title: `Вкладка «${sheetLabel}»: відрізняються або відсутні колонки`,
+            details: `Не знайдено: ${missing.join(', ')}. Наявні колонки у файлі: ${Object.keys(sampleRow).filter(k => !k.startsWith('__EMPTY')).join(', ')}.`
+          });
+        }
+      };
+
+      checkExpectedColumns(clientsSheet.name || 'Клієнти', rawClients[0], [
+        { label: 'ID клієнта', aliases: ['id клієнта', 'id', 'код клієнта'] },
+        { label: 'Відповідальний менеджер', aliases: ['відповідальний менеджер', 'менеджер'] },
+        { label: 'Етап супроводу', aliases: ['етап супроводу'] },
+        { label: 'НА ЯКОМУ ЕТАПІ ЗАВЕРШЕНО', aliases: ['на якому етапі завершено', 'етапі завершено'] },
+        { label: 'Військовий статус на ПОЧАТОК супроводу', aliases: ['військовий статус на початок супроводу', 'військовий статус'] },
+        { label: 'Статус клієнта на початок консультування', aliases: ['статус клієнта на початок консультування', 'статус клієнта'] },
+        { label: 'ВІК', aliases: ['вік'] },
+        { label: 'Канал першого звернення', aliases: ['канал першого звернення', 'канал'] },
+        { label: 'Стать', aliases: ['стать'] },
+        { label: 'Область', aliases: ['область'] },
+        { label: 'Що цікавить на момент першого звернення', aliases: ['що цікавить на момент першого звернення', 'що цікавить'] },
+        { label: 'Запити', aliases: ['запити'] },
+        { label: 'Консультації / Загальна кількість консультацій', aliases: ['загальна кількість консультацій', 'кількість консультацій', 'консультації'] },
+        { label: 'Дата першого звернення', aliases: ['дата першого звернення'] },
+        { label: 'Дата закриття', aliases: ['дата закриття'] },
+        { label: '<Updated At>', aliases: ['updated at', 'дата останнього оновлення'] }
+      ]);
+
+      checkExpectedColumns(requestsSheet.name || 'Запити', rawRequests[0], [
+        { label: 'ID запиту', aliases: ['id запиту', 'id'] },
+        { label: 'ID клієнта', aliases: ['id клієнта'] },
+        { label: 'Відповідальний КК', aliases: ['відповідальний кк'] },
+        { label: 'Етап виконання запиту', aliases: ['етап виконання запиту', 'етап виконання'] },
+        { label: 'Тип запиту', aliases: ['тип запиту'] },
+        { label: 'РЕЗУЛЬТАТИ', aliases: ['результати', 'результат'] },
+        { label: 'Оцінка вирішення запиту', aliases: ['оцінка вирішення запиту', 'оцінка вирішення'] },
+        { label: 'Загальна кількість консультацій', aliases: ['загальна кількість консультацій', 'кількість консультацій', 'консультації'] },
+        { label: 'Номер запиту', aliases: ['номер запиту', '№ запиту'] },
+        { label: 'Дата створення запиту', aliases: ['дата створення запиту', 'дата створення'] },
+        { label: 'Дата завершення запиту', aliases: ['дата завершення запиту', 'дата завершення'] },
+        { label: '<Updated At>', aliases: ['updated at', 'дата останнього оновлення'] }
+      ]);
+
+      if (!servicesSheet.headless) {
+        checkExpectedColumns(servicesSheet.name || 'Послуги', rawServices[0], [
+          { label: 'ID послуги', aliases: ['id послуги', 'id'] },
+          { label: 'ID клієнта', aliases: ['id клієнта'] },
+          { label: 'ID запиту', aliases: ['id запиту'] },
+          { label: 'Етап послуги', aliases: ['етап послуги'] },
+          { label: 'Тип послуги', aliases: ['тип послуги'] }
+        ]);
+      }
+
+      const mappedClients = rawClients.map((r, i) => {
+        const rawConsult = pickField(r, ['загальна кількість консультацій', 'кількість консультацій', 'консультації', 'консультац']);
+        return {
+          id: String(pickField(r, ['id клієнта', 'id', 'код клієнта']) || `CL-${i + 1}`).trim(),
+          managerRaw: String(pickField(r, ['відповідальний менеджер', 'менеджер']) || '').trim(),
+          supportStage: String(pickField(r, ['етап супроводу']) || '').trim(),
+          completedStage: String(pickField(r, ['на якому етапі завершено', 'етапі завершено']) || '').trim(),
+          militaryStatusStart: String(pickField(r, ['військовий статус на початок супроводу', 'військовий статус']) || '').trim(),
+          consultStatusStart: String(pickField(r, ['статус клієнта на початок консультування', 'статус клієнта']) || '').trim(),
+          age: String(pickField(r, ['вік']) || '').trim(),
+          channel: String(pickField(r, ['канал першого звернення', 'канал']) || '').trim(),
+          gender: String(pickField(r, ['стать']) || '').trim(),
+          oblast: String(pickField(r, ['область']) || '').trim(),
+          interestStart: String(pickField(r, ['що цікавить на момент першого звернення', 'що цікавить']) || '').trim(),
+          requestsFlag: String(pickField(r, ['запити']) || '').trim(),
+          consultationsCount: rawConsult === '' ? 0 : Number(rawConsult) || 0,
+          firstContactDate: excelSerialToDateStr(pickField(r, ['дата першого звернення'])),
+          closeDate: excelSerialToDateStr(pickField(r, ['дата закриття'])),
+          updatedAt: excelSerialToDateStr(pickField(r, ['updated at', 'дата останнього оновлення клієнта', 'дата останнього оновлення', 'оновлення']))
+        };
+      });
+
+      const clientManagerById = new Map();
+      mappedClients.forEach(c => {
+        if (c.id && c.managerRaw) clientManagerById.set(c.id, c.managerRaw);
+      });
+
+      const mappedRequests = rawRequests.map((r, i) => {
+        const rawConsult = pickField(r, ['загальна кількість консультацій', 'кількість консультацій', 'консультац']);
+        const mgr = String(pickField(r, ['відповідальний менеджер', 'менеджер']) || '').trim();
+        const respKK = String(pickField(r, ['відповідальний кк']) || mgr || '').trim();
+        const cId = String(pickField(r, ['id клієнта', 'клієнт id']) || '').trim();
+        return {
+          requestId: String(pickField(r, ['id запиту', 'id']) || `REQ-${i + 1}`).trim(),
+          clientId: cId,
+          managerRaw: mgr || clientManagerById.get(cId) || respKK,
+          responsibleKK: respKK,
+          executionStage: String(pickField(r, ['етап виконання запиту', 'етап виконання']) || '').trim(),
+          requestType: String(pickField(r, ['тип запиту']) || '').trim(),
+          results: String(pickField(r, ['результати', 'результат']) || '').trim(),
+          resolutionRating: String(pickField(r, ['оцінка вирішення запиту', 'оцінка вирішення', 'оцінка']) || '').trim(),
+          consultationsCount: rawConsult === '' || rawConsult === null ? null : Number(rawConsult),
+          requestNumber: String(pickField(r, ['номер запиту', '№ запиту']) || '').trim(),
+          createdDate: excelSerialToDateStr(pickField(r, ['дата створення запиту', 'дата створення'])),
+          completedDate: excelSerialToDateStr(pickField(r, ['дата завершення запиту', 'дата завершення'])),
+          updatedAt: excelSerialToDateStr(pickField(r, ['updated at', 'дата останнього оновлення запиту', 'дата останнього оновлення', 'оновлення']))
+        };
+      });
+
+      const requestManagerById = new Map();
+      mappedRequests.forEach(req => {
+        if (req.requestId && req.managerRaw) requestManagerById.set(req.requestId, req.managerRaw);
+      });
+
+      // Точний мапінг вкладки "Послуги" з збереженням усіх колонок 1-в-1 із файлу
+      const mappedServices = rawServices.map((r, i) => {
+        const srvId = String(pickField(r, ['id послуги', 'id', 'код послуги']) || `SRV-${i + 1}`).trim();
+        const cId = String(pickField(r, ['id клієнта', 'клієнт id']) || '').trim();
+        const rId = String(pickField(r, ['id запиту', 'запит id']) || '').trim();
+        const directMgr = String(pickField(r, ['відповідальний менеджер', 'відповідальний кк', 'менеджер', 'відповідальний']) || '').trim();
+        const stageVal = String(pickField(r, ['етап послуги', 'етап виконання послуги', 'етап']) || '').trim();
+        const typeVal = String(pickField(r, ['тип послуги', 'вид послуги', 'назва послуги', 'послуга']) || '').trim();
+
+        const resolvedMgr = directMgr || requestManagerById.get(rId) || clientManagerById.get(cId) || '';
+
+        return {
+          ...r,
+          serviceId: srvId,
+          clientId: cId,
+          requestId: rId,
+          managerRaw: resolvedMgr,
+          serviceStage: stageVal,
+          serviceType: typeVal
+        };
+      });
+
+      state.servicesColumns = servicesSheet.headers && servicesSheet.headers.length > 0
+        ? servicesSheet.headers
+        : (rawServices[0] ? Object.keys(rawServices[0]) : []);
+
+      const allFirstDates = mappedClients.map(c => c.firstContactDate).filter(Boolean).sort();
+      if (allFirstDates.length > 0) {
+        const latest = allFirstDates[allFirstDates.length - 1];
+        const monthStart = latest.slice(0, 7) + '-01';
+        state.analysisDate = monthStart;
+        document.getElementById('analysisDateInput').value = monthStart;
+      }
+
+      state.clients = mappedClients;
+      state.requests = mappedRequests;
+      state.services = mappedServices;
+      state.selectedManager = 'ALL';
+      state.chartFilter = null;
+      state.topLimits = { c4: 10, c5: 10, c6: 10, r17: 10, r18: 10, r19: 'ALL', s27: 'ALL' };
+      state.currentPage = 1;
+
+      const badge = document.getElementById('datasetBadge');
+      badge.textContent = sourceDisplayName;
+      badge.className = 'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-200';
+
+      populateManagerDropdown();
+      renderDashboard();
+
+      if (schemaIssues.length > 0) {
+        showSchemaWarningsModal(schemaIssues, sheetNames);
+        showToast(`Дані завантажено з попередженнями (${schemaIssues.length}). Перевірте деталі у вікні.`, 'warning');
+      } else {
+        showToast(`Успішно завантажено: ${mappedClients.length} клієнтів, ${mappedRequests.length} запитів, ${mappedServices.length} послуг.`, 'success');
+      }
+    }
+
+    function handleExcelUpload(file) {
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = function (e) {
+        try {
+          const data = new Uint8Array(e.target.result);
+          const workbook = XLSX.read(data, { type: 'array' });
+          processWorkbook(workbook, file.name);
+        } catch (err) {
+          console.error(err);
+          showToast('Помилка читання файлу. Перевірте формат .xlsx або .xls.', 'error');
+        }
+      };
+      reader.readAsArrayBuffer(file);
+    }
+
+    // Завантаження та обробка Google Таблиці за посиланням
+    async function handleGoogleSheetUrl(rawUrl) {
+      const url = String(rawUrl || '').trim();
+      const match = url.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+      if (!match) {
+        showToast('Невірний формат посилання. Вставте URL Google Таблиці (docs.google.com/spreadsheets/d/...).', 'error');
+        return;
+      }
+
+      const spreadsheetId = match[1];
+      const exportUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/export?format=xlsx`;
+      const loadBtn = document.getElementById('loadGoogleSheetBtn');
+      const origText = loadBtn.textContent;
+      loadBtn.disabled = true;
+      loadBtn.textContent = 'Завантаження...';
+
+      try {
+        const response = await fetch(exportUrl);
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+        const arrayBuffer = await response.arrayBuffer();
+        const workbook = XLSX.read(new Uint8Array(arrayBuffer), { type: 'array' });
+        document.getElementById('googleSheetModal').classList.add('hidden');
+        processWorkbook(workbook, `Google Таблиця (${spreadsheetId.slice(0, 8)}…)`);
+      } catch (err) {
+        console.error(err);
+        showToast('Не вдалося завантажити Google Таблицю. Перевірте, що відкрито доступ «Усі, хто має посилання».', 'error');
+      } finally {
+        loadBtn.disabled = false;
+        loadBtn.textContent = origText;
+      }
+    }
+
+    // =========================================================================
+    // 12. ОНОВЛЕННЯ СПИСКУ МЕНЕДЖЕРІВ ТА ЗАГАЛЬНИЙ РЕНДЕР
+    // =========================================================================
+    function populateManagerDropdown() {
+      const select = document.getElementById('managerFilter');
+      const uniqueManagers = new Set();
+
+      // Для фільтру за менеджерами розбиваємо клітинки з 2+ менеджерами на окремих осіб
+      [...state.clients, ...state.requests, ...state.services].forEach(row => {
+        parsePeopleList(row.managerRaw).forEach(m => {
+          if (m !== 'Не вказано') uniqueManagers.add(m);
+        });
+      });
+
+      const sorted = Array.from(uniqueManagers).sort((a, b) => a.localeCompare(b, 'uk'));
+      select.innerHTML = `<option value="ALL">Усі менеджери (сумарно — ${state.clients.length} кл. / ${state.requests.length} зап.)</option>` +
+        sorted.map(m => `<option value="${m.replace(/"/g, '&quot;')}">${m}</option>`).join('');
+      select.value = state.selectedManager;
+    }
+
+    function renderDashboard() {
+      document.getElementById('tabCountClients').textContent = getFilteredClients().length;
+      document.getElementById('tabCountRequests').textContent = getFilteredRequests().length;
+      document.getElementById('tabCountServices').textContent = getFilteredServices().length;
+
+      const banner = document.getElementById('activeFilterBanner');
+      if (state.chartFilter) {
+        banner.classList.remove('hidden');
+        banner.classList.add('flex');
+        document.getElementById('activeFilterLabel').textContent = state.chartFilter.label;
+      } else {
+        banner.classList.add('hidden');
+        banner.classList.remove('flex');
+      }
+
+      document.querySelectorAll('.tab-view').forEach(el => el.classList.add('hidden'));
+      document.getElementById(`view-${state.activeTab}`).classList.remove('hidden');
+
+      document.querySelectorAll('.tab-btn').forEach(btn => {
+        const isCurrent = btn.getAttribute('data-tab') === state.activeTab;
+        if (isCurrent) {
+          btn.className = 'tab-btn px-4 py-2 rounded-xl text-sm font-bold transition cursor-pointer bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs';
+        } else {
+          btn.className = 'tab-btn px-4 py-2 rounded-xl text-sm font-bold transition cursor-pointer text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white';
+        }
+      });
+
+      if (state.activeTab === 'clients') renderClientsTab();
+      else if (state.activeTab === 'requests') renderRequestsTab();
+      else if (state.activeTab === 'services') renderServicesTab();
+
+      renderDataTable();
+    }
+
+    function exportCurrentTableCsv() {
+      const { sourceType, rows } = getTableDataset();
+      if (rows.length === 0) {
+        showToast('Немає записів для експорту.', 'error');
+        return;
+      }
+      const headers = Object.keys(rows[0]);
+      const csvLines = [
+        headers.join(';'),
+        ...rows.map(r => headers.map(h => `"${String(r[h] ?? '').replace(/"/g, '""')}"`).join(';'))
+      ];
+      const blob = new Blob(['\uFEFF' + csvLines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `export_${sourceType}_${state.analysisDate}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+      showToast('CSV-файл успішно експортовано.', 'success');
+    }
+
+    // =========================================================================
+    // 13. ІНІЦІАЛІЗАЦІЯ ПОДІЙ ТА ЗАПУСК
+    // =========================================================================
+    window.addEventListener('DOMContentLoaded', () => {
+      document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          state.activeTab = btn.getAttribute('data-tab');
+          state.chartFilter = null;
+          state.searchQuery = '';
+          document.getElementById('tableSearchInput').value = '';
+          state.currentPage = 1;
+          renderDashboard();
+        });
+      });
+
+      document.getElementById('managerFilter').addEventListener('change', e => {
+        state.selectedManager = e.target.value;
+        state.chartFilter = null;
+        state.currentPage = 1;
+        renderDashboard();
+      });
+
+      document.getElementById('analysisDateInput').addEventListener('change', e => {
+        if (e.target.value) {
+          state.analysisDate = e.target.value;
+          renderDashboard();
+        }
+      });
+
+      document.getElementById('clearChartFilterBtn').addEventListener('click', () => {
+        state.chartFilter = null;
+        state.currentPage = 1;
+        renderDashboard();
+      });
+
+      document.getElementById('tableSearchInput').addEventListener('input', e => {
+        state.searchQuery = e.target.value;
+        state.currentPage = 1;
+        renderDataTable();
+      });
+
+      document.getElementById('pageSizeSelect').addEventListener('change', e => {
+        state.pageSize = Number(e.target.value);
+        state.currentPage = 1;
+        renderDataTable();
+      });
+
+      document.getElementById('prevPageBtn').addEventListener('click', () => {
+        if (state.currentPage > 1) {
+          state.currentPage--;
+          renderDataTable();
+        }
+      });
+      document.getElementById('nextPageBtn').addEventListener('click', () => {
+        state.currentPage++;
+        renderDataTable();
+      });
+
+      document.getElementById('excelFileInput').addEventListener('change', e => {
+        if (e.target.files && e.target.files[0]) {
+          handleExcelUpload(e.target.files[0]);
+          e.target.value = '';
+        }
+      });
+
+      // Модальне вікно Google Таблиці
+      const googleModal = document.getElementById('googleSheetModal');
+      document.getElementById('openGoogleSheetModalBtn').addEventListener('click', () => {
+        googleModal.classList.remove('hidden');
+        document.getElementById('googleSheetUrlInput').focus();
+      });
+      document.getElementById('closeGoogleModalBtn').addEventListener('click', () => googleModal.classList.add('hidden'));
+      document.getElementById('cancelGoogleModalBtn').addEventListener('click', () => googleModal.classList.add('hidden'));
+      googleModal.addEventListener('click', e => {
+        if (e.target.id === 'googleSheetModal') googleModal.classList.add('hidden');
+      });
+      document.getElementById('loadGoogleSheetBtn').addEventListener('click', () => {
+        handleGoogleSheetUrl(document.getElementById('googleSheetUrlInput').value);
+      });
+      document.getElementById('googleSheetUrlInput').addEventListener('keydown', e => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          handleGoogleSheetUrl(e.target.value);
+        }
+      });
+
+      document.body.addEventListener('dragover', e => e.preventDefault());
+      document.body.addEventListener('drop', e => {
+        e.preventDefault();
+        if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]) {
+          handleExcelUpload(e.dataTransfer.files[0]);
+        }
+      });
+
+      document.getElementById('resetDemoBtn').addEventListener('click', () => {
+        const demo = createDemoDataset();
+        state.clients = demo.clients;
+        state.requests = demo.requests;
+        state.services = demo.services;
+        state.servicesColumns = [];
+        state.selectedManager = 'ALL';
+        state.analysisDate = '2026-10-01';
+        document.getElementById('analysisDateInput').value = '2026-10-01';
+        state.chartFilter = null;
+        state.topLimits = { c4: 10, c5: 10, c6: 10, r17: 10, r18: 10, r19: 'ALL', s27: 'ALL' };
+        state.currentPage = 1;
+        const badge = document.getElementById('datasetBadge');
+        badge.textContent = 'Демо-дані (завантажте .xlsx)';
+        badge.className = 'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-200';
+        populateManagerDropdown();
+        renderDashboard();
+        showToast('Відновлено демонстраційний набір даних.');
+      });
+
+      document.getElementById('exportCsvBtn').addEventListener('click', exportCurrentTableCsv);
+
+      document.getElementById('themeToggleBtn').addEventListener('click', () => {
+        document.documentElement.classList.toggle('dark');
+        renderDashboard();
+      });
+
+      document.getElementById('closeModalBtn').addEventListener('click', () => {
+        document.getElementById('recordModal').classList.add('hidden');
+      });
+      document.getElementById('recordModal').addEventListener('click', e => {
+        if (e.target.id === 'recordModal') {
+          document.getElementById('recordModal').classList.add('hidden');
+        }
+      });
+
+      document.getElementById('closeSchemaModalBtn').addEventListener('click', () => {
+        document.getElementById('schemaWarningModal').classList.add('hidden');
+      });
+      document.getElementById('ackSchemaModalBtn').addEventListener('click', () => {
+        document.getElementById('schemaWarningModal').classList.add('hidden');
+      });
+      document.getElementById('schemaWarningModal').addEventListener('click', e => {
+        if (e.target.id === 'schemaWarningModal') {
+          document.getElementById('schemaWarningModal').classList.add('hidden');
+        }
+      });
+
+      let resizeTimer;
+      window.addEventListener('resize', () => {
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(() => renderDashboard(), 180);
+      });
+
+      populateManagerDropdown();
+      renderDashboard();
+    });
+  </script>
+</body>
+</html>
